@@ -1,43 +1,41 @@
-# Svelte + Vite
+# Glance
 
-This template should help get you started developing with Svelte in Vite.
+> See everything, Optimize Anything
 
-## Recommended IDE Setup
+Just made it out because I was bored, not many people will use it anyway.
 
-[VS Code](https://code.visualstudio.com/) + [Svelte](https://marketplace.visualstudio.com/items?itemName=svelte.svelte-vscode).
+## Description
 
-## Need an official Svelte framework?
+Glance (formerly Linux Optimizer) is a modern system utility for Linux, built with **Tauri v2** (Rust) and **Svelte 5**. It combines system monitoring, cleaning, and optimization tools into a unified, beautiful interface with a glassmorphism design.
 
-Check out [SvelteKit](https://github.com/sveltejs/kit#readme), which is also powered by Vite. Deploy anywhere with its serverless-first approach and adapt to various platforms, with out of the box support for TypeScript, SCSS, and Less, and easily-added support for mdsvex, GraphQL, PostCSS, Tailwind CSS, and more.
+## Features
 
-## Technical considerations
+- **📊 Dashboard**: Real-time system statistics (CPU, RAM, Disk).
+- **📈 Resource Monitor**: Live history charts for CPU, Memory, and Network traffic.
+- **🧹 System Cleaner**: Clean trash, caches, logs, and old kernels safe and easily.
+- **⚙️ Performance Tweaks**: Apply recommended system settings (BBR, Swappiness, etc.).
+- **📦 Repository Manager**: Manage APT sources, PPAs, and find the fastest mirrors.
+- **🌐 Hosts Editor**: Edit `/etc/hosts` and import ad-blocking lists.
+- **🔧 Services**: Manage systemd services.
+- **📦 Packages**: Search and remove installed packages.
+- **🚀 Startup**: Manage autostart applications.
 
-**Why use this over SvelteKit?**
+## Installation
 
-- It brings its own routing solution which might not be preferable for some users.
-- It is first and foremost a framework that just happens to use Vite under the hood, not a Vite app.
+### Prerequisites
+- Ubuntu 24.04+ or Debian 12+
+- `libwebkit2gtk-4.1-0`, `libgtk-3-0`, `curl`, `pkexec`
 
-This template contains as little as possible to get started with Vite + Svelte, while taking into account the developer experience with regards to HMR and intellisense. It demonstrates capabilities on par with the other `create-vite` templates and is a good starting point for beginners dipping their toes into a Vite + Svelte project.
-
-Should you later need the extended capabilities and extensibility provided by SvelteKit, the template has been structured similarly to SvelteKit so that it is easy to migrate.
-
-**Why include `.vscode/extensions.json`?**
-
-Other templates indirectly recommend extensions via the README, but this file allows VS Code to prompt the user to install the recommended extension upon opening the project.
-
-**Why enable `checkJs` in the JS template?**
-
-It is likely that most cases of changing variable types in runtime are likely to be accidental, rather than deliberate. This provides advanced typechecking out of the box. Should you like to take advantage of the dynamically-typed nature of JavaScript, it is trivial to change the configuration.
-
-**Why is HMR not preserving my local component state?**
-
-HMR state preservation comes with a number of gotchas! It has been disabled by default in both `svelte-hmr` and `@sveltejs/vite-plugin-svelte` due to its often surprising behavior. You can read the details [here](https://github.com/sveltejs/svelte-hmr/tree/master/packages/svelte-hmr#preservation-of-local-state).
-
-If you have state that's important to retain within a component, consider creating an external store which would not be replaced by HMR.
-
-```js
-// store.js
-// An extremely simple external store
-import { writable } from 'svelte/store'
-export default writable(0)
+### Build from Source
+```bash
+git clone https://github.com/yourusername/glance.git
+cd glance
+npm install
+npm run tauri build
 ```
+
+The .deb package will be in `src-tauri/target/release/bundle/deb/`.
+
+## License
+
+MIT

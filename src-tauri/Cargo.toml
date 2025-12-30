@@ -1,5 +1,5 @@
 [package]
-name = "linux-optimizer"
+name = "glance"
 version = "0.1.0"
 description = "A modern Linux system optimizer - inspired by Stacer"
 authors = ["alfarez"]

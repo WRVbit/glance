@@ -14,7 +14,7 @@
   // State (Svelte 5 Runes)
   // ============================================================================
 
-  /** @type {'dashboard' | 'cleaner' | 'tweaks' | 'services' | 'startup' | 'packages' | 'processes'} */
+  /** @type {'dashboard' | 'cleaner' | 'tweaks' | 'services' | 'startup' | 'packages' | 'processes' | 'repositories' | 'resources' | 'hosts'} */
   let currentPage = $state("dashboard");
   let loading = $state(true);
 
@@ -484,7 +484,7 @@
         🚀
       </div>
       <div>
-        <h1 class="font-bold text-lg text-gradient">Linux Optimizer</h1>
+        <h1 class="font-bold text-lg text-gradient">Glance</h1>
         <p class="text-xs text-gray-500">v0.1.0</p>
       </div>
     </div>
