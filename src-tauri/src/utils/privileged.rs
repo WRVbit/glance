@@ -1,8 +1,13 @@
 //! Privileged command execution
-//! Safe wrapper for pkexec with input validation
+//! Safe async wrapper for pkexec with timeout
 
 use crate::error::{AppError, Result};
-use std::process::Command;
+use std::process::Stdio;
+use tokio::process::Command;
+use tokio::time::{timeout, Duration};
+
+/// Timeout for privileged operations (30 seconds)
+const PKEXEC_TIMEOUT_SECS: u64 = 30;
 
 /// Whitelist of allowed commands for privileged execution
 const ALLOWED_COMMANDS: &[&str] = &[
@@ -16,23 +21,15 @@ const ALLOWED_COMMANDS: &[&str] = &[
     "add-apt-repository",
     "cp",
     "tee",
-    "curl",
 ];
 
-/// Whitelist of allowed paths for deletion
-const ALLOWED_DELETE_PATHS: &[&str] = &[
-    "/var/cache/apt/archives",
-    "/var/log/journal",
-    "/tmp",
-];
-
-/// Execute a command with root privileges via pkexec
+/// Execute a command with root privileges via pkexec (async with timeout)
 /// 
 /// # Security
 /// - Only whitelisted commands are allowed
-/// - Arguments are validated before execution
 /// - Uses pkexec for GUI-friendly authentication
-pub fn run_privileged(cmd: &str, args: &[&str]) -> Result<String> {
+/// - 30 second timeout to prevent app freeze if user ignores dialog
+pub async fn run_privileged(cmd: &str, args: &[&str]) -> Result<String> {
     // Validate command is whitelisted
     if !ALLOWED_COMMANDS.contains(&cmd) {
         return Err(AppError::PermissionDenied(format!(
@@ -41,12 +38,20 @@ pub fn run_privileged(cmd: &str, args: &[&str]) -> Result<String> {
         )));
     }
 
-    // Execute via pkexec
-    let output = Command::new("pkexec")
+    // Spawn the pkexec process
+    let child = Command::new("pkexec")
         .arg(cmd)
         .args(args)
-        .output()
-        .map_err(|e| AppError::CommandFailed(format!("Failed to execute pkexec: {}", e)))?;
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| AppError::CommandFailed(format!("Failed to spawn pkexec: {}", e)))?;
+
+    // Wait with timeout
+    let output = timeout(Duration::from_secs(PKEXEC_TIMEOUT_SECS), child.wait_with_output())
+        .await
+        .map_err(|_| AppError::Timeout("Authentication dialog timed out after 30 seconds".to_string()))?
+        .map_err(|e| AppError::CommandFailed(format!("Command execution failed: {}", e)))?;
 
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -54,7 +59,7 @@ pub fn run_privileged(cmd: &str, args: &[&str]) -> Result<String> {
         let stderr = String::from_utf8_lossy(&output.stderr);
         
         // Check if user cancelled
-        if stderr.contains("dismissed") || stderr.contains("cancelled") {
+        if stderr.contains("dismissed") || stderr.contains("cancelled") || stderr.contains("Not authorized") {
             return Err(AppError::UserCancelled);
         }
         
@@ -62,9 +67,9 @@ pub fn run_privileged(cmd: &str, args: &[&str]) -> Result<String> {
     }
 }
 
-/// Execute a shell command with root privileges
+/// Execute a shell command with root privileges (async with timeout)
 /// Only for specific, validated operations
-pub fn run_privileged_shell(script: &str) -> Result<String> {
+pub async fn run_privileged_shell(script: &str) -> Result<String> {
     // Basic validation - no dangerous patterns
     let dangerous_patterns = ["rm -rf /", "dd if=", "mkfs", "> /dev/"];
     for pattern in dangerous_patterns {
@@ -76,58 +81,39 @@ pub fn run_privileged_shell(script: &str) -> Result<String> {
         }
     }
 
-    let output = Command::new("pkexec")
+    // Spawn the pkexec bash process
+    let child = Command::new("pkexec")
         .args(["bash", "-c", script])
-        .output()
-        .map_err(|e| AppError::CommandFailed(format!("Failed to execute: {}", e)))?;
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| AppError::CommandFailed(format!("Failed to spawn pkexec: {}", e)))?;
+
+    // Wait with timeout
+    let output = timeout(Duration::from_secs(PKEXEC_TIMEOUT_SECS), child.wait_with_output())
+        .await
+        .map_err(|_| AppError::Timeout("Authentication dialog timed out after 30 seconds".to_string()))?
+        .map_err(|e| AppError::CommandFailed(format!("Command execution failed: {}", e)))?;
 
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        if stderr.contains("dismissed") {
+        if stderr.contains("dismissed") || stderr.contains("Not authorized") {
             return Err(AppError::UserCancelled);
         }
         Err(AppError::CommandFailed(stderr.to_string()))
     }
 }
 
-/// Validate a path is safe to delete
-pub fn validate_delete_path(path: &str) -> Result<()> {
-    // Must be absolute path
-    if !path.starts_with('/') {
-        return Err(AppError::PermissionDenied(
-            "Path must be absolute".to_string(),
-        ));
-    }
-
-    // Check against whitelist for system paths
-    if path.starts_with("/var") || path.starts_with("/etc") || path.starts_with("/usr") {
-        let is_allowed = ALLOWED_DELETE_PATHS.iter().any(|allowed| path.starts_with(allowed));
-        if !is_allowed {
-            return Err(AppError::PermissionDenied(format!(
-                "Path '{}' is not in allowed deletion paths",
-                path
-            )));
-        }
-    }
-
-    // Prevent deleting critical paths
-    let critical = ["/", "/home", "/root", "/boot", "/bin", "/sbin", "/lib"];
-    if critical.contains(&path) {
-        return Err(AppError::PermissionDenied(
-            "Cannot delete critical system path".to_string(),
-        ));
-    }
-
-    Ok(())
-}
-
-/// Run a non-privileged command
-pub fn run_command(cmd: &str, args: &[&str]) -> Result<String> {
+/// Run a non-privileged async command
+pub async fn run_async_command(cmd: &str, args: &[&str]) -> Result<String> {
     let output = Command::new(cmd)
         .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .output()
+        .await
         .map_err(|e| AppError::CommandFailed(format!("Failed to execute {}: {}", cmd, e)))?;
 
     if output.status.success() {

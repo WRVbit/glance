@@ -1,10 +1,10 @@
 //! Systemd services module
-//! Lists and manages system services
+//! Lists and manages system services (async)
 
 use crate::error::{AppError, Result};
 use crate::utils::privileged;
 use serde::{Deserialize, Serialize};
-use std::process::Command;
+use tokio::process::Command;
 
 // ============================================================================
 // Data Structures
@@ -31,12 +31,12 @@ pub struct ServiceAction {
 }
 
 // ============================================================================
-// Tauri Commands
+// Tauri Commands (All async)
 // ============================================================================
 
-/// List all systemd services
+/// List all systemd services (async)
 #[tauri::command]
-pub fn get_services() -> Result<Vec<ServiceInfo>> {
+pub async fn get_services() -> Result<Vec<ServiceInfo>> {
     // Get list of all services
     let output = Command::new("systemctl")
         .args([
@@ -47,6 +47,7 @@ pub fn get_services() -> Result<Vec<ServiceInfo>> {
             "--no-legend",
         ])
         .output()
+        .await
         .map_err(|e| AppError::CommandFailed(format!("Failed to run systemctl: {}", e)))?;
 
     if !output.status.success() {
@@ -71,8 +72,8 @@ pub fn get_services() -> Result<Vec<ServiceInfo>> {
         let sub_state = parts[3].to_string();
         let description = parts[4..].join(" ");
 
-        // Check if enabled
-        let is_enabled = check_enabled(&name);
+        // Check if enabled (async)
+        let is_enabled = check_enabled_async(&name).await;
 
         services.push(ServiceInfo {
             name: name.clone(),
@@ -92,19 +93,20 @@ pub fn get_services() -> Result<Vec<ServiceInfo>> {
     Ok(services)
 }
 
-/// Check if a service is enabled
-fn check_enabled(name: &str) -> bool {
+/// Check if a service is enabled (async helper)
+async fn check_enabled_async(name: &str) -> bool {
     Command::new("systemctl")
         .args(["is-enabled", name])
         .output()
+        .await
         .map(|o| o.status.success())
         .unwrap_or(false)
 }
 
-/// Start a service (requires auth)
+/// Start a service (requires auth, async with timeout)
 #[tauri::command]
-pub fn start_service(name: String) -> Result<ServiceAction> {
-    let result = privileged::run_privileged("systemctl", &["start", &name]);
+pub async fn start_service(name: String) -> Result<ServiceAction> {
+    let result = privileged::run_privileged("systemctl", &["start", &name]).await;
 
     match result {
         Ok(_) => Ok(ServiceAction {
@@ -119,14 +121,20 @@ pub fn start_service(name: String) -> Result<ServiceAction> {
             success: false,
             message: "Operation cancelled by user".to_string(),
         }),
+        Err(AppError::Timeout(msg)) => Ok(ServiceAction {
+            name,
+            action: "start".to_string(),
+            success: false,
+            message: msg,
+        }),
         Err(e) => Err(e),
     }
 }
 
-/// Stop a service (requires auth)
+/// Stop a service (requires auth, async with timeout)
 #[tauri::command]
-pub fn stop_service(name: String) -> Result<ServiceAction> {
-    let result = privileged::run_privileged("systemctl", &["stop", &name]);
+pub async fn stop_service(name: String) -> Result<ServiceAction> {
+    let result = privileged::run_privileged("systemctl", &["stop", &name]).await;
 
     match result {
         Ok(_) => Ok(ServiceAction {
@@ -141,14 +149,20 @@ pub fn stop_service(name: String) -> Result<ServiceAction> {
             success: false,
             message: "Operation cancelled by user".to_string(),
         }),
+        Err(AppError::Timeout(msg)) => Ok(ServiceAction {
+            name,
+            action: "stop".to_string(),
+            success: false,
+            message: msg,
+        }),
         Err(e) => Err(e),
     }
 }
 
-/// Restart a service (requires auth)
+/// Restart a service (requires auth, async with timeout)
 #[tauri::command]
-pub fn restart_service(name: String) -> Result<ServiceAction> {
-    let result = privileged::run_privileged("systemctl", &["restart", &name]);
+pub async fn restart_service(name: String) -> Result<ServiceAction> {
+    let result = privileged::run_privileged("systemctl", &["restart", &name]).await;
 
     match result {
         Ok(_) => Ok(ServiceAction {
@@ -163,14 +177,20 @@ pub fn restart_service(name: String) -> Result<ServiceAction> {
             success: false,
             message: "Operation cancelled by user".to_string(),
         }),
+        Err(AppError::Timeout(msg)) => Ok(ServiceAction {
+            name,
+            action: "restart".to_string(),
+            success: false,
+            message: msg,
+        }),
         Err(e) => Err(e),
     }
 }
 
-/// Enable a service (requires auth)
+/// Enable a service (requires auth, async with timeout)
 #[tauri::command]
-pub fn enable_service(name: String) -> Result<ServiceAction> {
-    let result = privileged::run_privileged("systemctl", &["enable", &name]);
+pub async fn enable_service(name: String) -> Result<ServiceAction> {
+    let result = privileged::run_privileged("systemctl", &["enable", &name]).await;
 
     match result {
         Ok(_) => Ok(ServiceAction {
@@ -185,14 +205,20 @@ pub fn enable_service(name: String) -> Result<ServiceAction> {
             success: false,
             message: "Operation cancelled by user".to_string(),
         }),
+        Err(AppError::Timeout(msg)) => Ok(ServiceAction {
+            name,
+            action: "enable".to_string(),
+            success: false,
+            message: msg,
+        }),
         Err(e) => Err(e),
     }
 }
 
-/// Disable a service (requires auth)
+/// Disable a service (requires auth, async with timeout)
 #[tauri::command]
-pub fn disable_service(name: String) -> Result<ServiceAction> {
-    let result = privileged::run_privileged("systemctl", &["disable", &name]);
+pub async fn disable_service(name: String) -> Result<ServiceAction> {
+    let result = privileged::run_privileged("systemctl", &["disable", &name]).await;
 
     match result {
         Ok(_) => Ok(ServiceAction {
@@ -207,14 +233,20 @@ pub fn disable_service(name: String) -> Result<ServiceAction> {
             success: false,
             message: "Operation cancelled by user".to_string(),
         }),
+        Err(AppError::Timeout(msg)) => Ok(ServiceAction {
+            name,
+            action: "disable".to_string(),
+            success: false,
+            message: msg,
+        }),
         Err(e) => Err(e),
     }
 }
 
-/// Search services by name
+/// Search services by name (async)
 #[tauri::command]
-pub fn search_services(query: String) -> Result<Vec<ServiceInfo>> {
-    let all_services = get_services()?;
+pub async fn search_services(query: String) -> Result<Vec<ServiceInfo>> {
+    let all_services = get_services().await?;
     let query_lower = query.to_lowercase();
 
     let filtered: Vec<ServiceInfo> = all_services

@@ -1,4 +1,4 @@
-//! Custom error types for Linux Optimizer
+//! Custom error types for Glance
 //! Uses thiserror for ergonomic error definitions
 
 use thiserror::Error;
@@ -18,14 +18,14 @@ pub enum AppError {
     #[error("Command failed: {0}")]
     CommandFailed(String),
 
-    #[error("Parse error: {0}")]
-    Parse(String),
-
-    #[error("Not supported on this distribution")]
-    UnsupportedDistro,
+    #[error("Operation timed out: {0}")]
+    Timeout(String),
 
     #[error("User cancelled operation")]
     UserCancelled,
+
+    #[error("Network error: {0}")]
+    Network(String),
 }
 
 // Manual From implementation for std::io::Error
@@ -47,4 +47,3 @@ impl serde::Serialize for AppError {
         serializer.serialize_str(&self.to_string())
     }
 }
-

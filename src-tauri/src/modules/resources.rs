@@ -1,12 +1,12 @@
 //! Resource Monitor module
-//! Collects and stores resource usage history for graphing
+//! Collects and stores resource usage history for graphing (Non-blocking)
 
 use crate::error::Result;
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::sync::Mutex;
-use sysinfo::{CpuRefreshKind, MemoryRefreshKind, Networks, System};
+use sysinfo::{CpuRefreshKind, MemoryRefreshKind, Networks};
 use tauri::State;
 
 // ============================================================================
@@ -35,16 +35,12 @@ pub struct ResourceHistory {
 /// Shared state for resource history
 pub struct ResourceHistoryState {
     pub history: Mutex<VecDeque<ResourceSnapshot>>,
-    pub last_net_rx: Mutex<u64>,
-    pub last_net_tx: Mutex<u64>,
 }
 
 impl ResourceHistoryState {
     pub fn new() -> Self {
         Self {
             history: Mutex::new(VecDeque::with_capacity(HISTORY_SIZE)),
-            last_net_rx: Mutex::new(0),
-            last_net_tx: Mutex::new(0),
         }
     }
 }
@@ -56,49 +52,53 @@ impl Default for ResourceHistoryState {
 }
 
 // ============================================================================
-// Tauri Commands
+// Tauri Commands (All non-blocking)
 // ============================================================================
 
-/// Get current resource snapshot and add to history
+/// Get current resource snapshot - NO SLEEP, returns immediately
+/// CPU usage accuracy depends on frontend polling interval
 #[tauri::command]
-pub fn get_resource_snapshot(app_state: State<AppState>) -> Result<ResourceSnapshot> {
-    let mut sys = app_state.sys.lock().unwrap();
+pub async fn get_resource_snapshot(app_state: State<'_, AppState>) -> Result<ResourceSnapshot> {
+    // Use tokio::task::spawn_blocking for mutex lock since it might block briefly
+    let snapshot = tokio::task::spawn_blocking(move || {
+        let mut sys = app_state.sys.lock().unwrap();
+        
+        // Refresh CPU - usage will be calculated based on delta from last refresh
+        sys.refresh_cpu_specifics(CpuRefreshKind::nothing().with_cpu_usage());
+        sys.refresh_memory_specifics(MemoryRefreshKind::everything());
+        
+        // Calculate CPU average
+        let cpu_percent: f32 = if sys.cpus().is_empty() {
+            0.0
+        } else {
+            sys.cpus().iter().map(|cpu| cpu.cpu_usage()).sum::<f32>() / sys.cpus().len() as f32
+        };
+        
+        // Get network stats
+        let networks = Networks::new_with_refreshed_list();
+        let (net_rx, net_tx) = networks
+            .iter()
+            .filter(|(name, _)| !name.starts_with("lo") && !name.starts_with("docker"))
+            .fold((0u64, 0u64), |(rx, tx), (_, data)| {
+                (rx + data.total_received(), tx + data.total_transmitted())
+            });
+        
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        
+        ResourceSnapshot {
+            timestamp,
+            cpu_percent,
+            ram_used_bytes: sys.used_memory(),
+            ram_total_bytes: sys.total_memory(),
+            net_rx_bytes: net_rx,
+            net_tx_bytes: net_tx,
+        }
+    }).await.unwrap();
     
-    // Refresh CPU and memory
-    sys.refresh_cpu_specifics(CpuRefreshKind::everything());
-    std::thread::sleep(std::time::Duration::from_millis(100));
-    sys.refresh_cpu_specifics(CpuRefreshKind::nothing().with_cpu_usage());
-    sys.refresh_memory_specifics(MemoryRefreshKind::everything());
-    
-    // Calculate CPU average
-    let cpu_percent: f32 = if sys.cpus().is_empty() {
-        0.0
-    } else {
-        sys.cpus().iter().map(|cpu| cpu.cpu_usage()).sum::<f32>() / sys.cpus().len() as f32
-    };
-    
-    // Get network stats
-    let networks = Networks::new_with_refreshed_list();
-    let (net_rx, net_tx) = networks
-        .iter()
-        .filter(|(name, _)| !name.starts_with("lo") && !name.starts_with("docker"))
-        .fold((0u64, 0u64), |(rx, tx), (_, data)| {
-            (rx + data.total_received(), tx + data.total_transmitted())
-        });
-    
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    
-    Ok(ResourceSnapshot {
-        timestamp,
-        cpu_percent,
-        ram_used_bytes: sys.used_memory(),
-        ram_total_bytes: sys.total_memory(),
-        net_rx_bytes: net_rx,
-        net_tx_bytes: net_tx,
-    })
+    Ok(snapshot)
 }
 
 /// Get resource history with calculated network speeds
@@ -159,14 +159,14 @@ pub fn clear_resource_history(history_state: State<ResourceHistoryState>) -> Res
     Ok(())
 }
 
-/// Get per-core CPU usage for detailed view
+/// Get per-core CPU usage for detailed view - NO SLEEP
 #[tauri::command]
-pub fn get_per_core_usage(app_state: State<AppState>) -> Result<Vec<f32>> {
-    let mut sys = app_state.sys.lock().unwrap();
+pub async fn get_per_core_usage(app_state: State<'_, AppState>) -> Result<Vec<f32>> {
+    let per_core = tokio::task::spawn_blocking(move || {
+        let mut sys = app_state.sys.lock().unwrap();
+        sys.refresh_cpu_specifics(CpuRefreshKind::nothing().with_cpu_usage());
+        sys.cpus().iter().map(|cpu| cpu.cpu_usage()).collect::<Vec<f32>>()
+    }).await.unwrap();
     
-    sys.refresh_cpu_specifics(CpuRefreshKind::everything());
-    std::thread::sleep(std::time::Duration::from_millis(100));
-    sys.refresh_cpu_specifics(CpuRefreshKind::nothing().with_cpu_usage());
-    
-    Ok(sys.cpus().iter().map(|cpu| cpu.cpu_usage()).collect())
+    Ok(per_core)
 }

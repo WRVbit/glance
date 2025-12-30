@@ -1,5 +1,5 @@
 //! Process management module
-//! Uses native sysinfo crate for process listing
+//! Uses native sysinfo crate for process listing (async)
 
 use crate::error::{AppError, Result};
 use serde::{Deserialize, Serialize};
@@ -44,54 +44,59 @@ fn status_to_string(status: ProcessStatus) -> String {
 }
 
 // ============================================================================
-// Tauri Commands
+// Tauri Commands (All async)
 // ============================================================================
 
-/// Get all running processes
+/// Get all running processes (async)
 #[tauri::command]
-pub fn get_processes() -> Result<Vec<ProcessInfo>> {
-    let mut sys = System::new();
+pub async fn get_processes() -> Result<Vec<ProcessInfo>> {
+    // Spawn blocking since sysinfo does system calls
+    let processes = tokio::task::spawn_blocking(|| {
+        let mut sys = System::new();
 
-    // Refresh process list
-    sys.refresh_processes(ProcessesToUpdate::All, true);
+        // Refresh process list
+        sys.refresh_processes(ProcessesToUpdate::All, true);
 
-    let mut processes: Vec<ProcessInfo> = sys
-        .processes()
-        .iter()
-        .map(|(pid, process)| {
-            ProcessInfo {
-                pid: pid.as_u32(),
-                name: process.name().to_string_lossy().to_string(),
-                cpu_usage: process.cpu_usage(),
-                memory_bytes: process.memory(),
-                status: status_to_string(process.status()),
-                user: process
-                    .user_id()
-                    .map(|uid| uid.to_string())
-                    .unwrap_or_else(|| "unknown".to_string()),
-                command: process.cmd().iter().map(|s| s.to_string_lossy().to_string()).collect::<Vec<_>>().join(" "),
-            }
-        })
-        .collect();
+        let mut processes: Vec<ProcessInfo> = sys
+            .processes()
+            .iter()
+            .map(|(pid, process)| {
+                ProcessInfo {
+                    pid: pid.as_u32(),
+                    name: process.name().to_string_lossy().to_string(),
+                    cpu_usage: process.cpu_usage(),
+                    memory_bytes: process.memory(),
+                    status: status_to_string(process.status()),
+                    user: process
+                        .user_id()
+                        .map(|uid| uid.to_string())
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    command: process.cmd().iter().map(|s| s.to_string_lossy().to_string()).collect::<Vec<_>>().join(" "),
+                }
+            })
+            .collect();
 
-    // Sort by CPU usage (descending)
-    processes.sort_by(|a, b| b.cpu_usage.partial_cmp(&a.cpu_usage).unwrap_or(std::cmp::Ordering::Equal));
+        // Sort by CPU usage (descending)
+        processes.sort_by(|a, b| b.cpu_usage.partial_cmp(&a.cpu_usage).unwrap_or(std::cmp::Ordering::Equal));
+
+        processes
+    }).await.unwrap();
 
     Ok(processes)
 }
 
-/// Get top processes by CPU usage
+/// Get top processes by CPU usage (async)
 #[tauri::command]
-pub fn get_top_processes(limit: usize) -> Result<Vec<ProcessInfo>> {
-    let mut processes = get_processes()?;
+pub async fn get_top_processes(limit: usize) -> Result<Vec<ProcessInfo>> {
+    let mut processes = get_processes().await?;
     processes.truncate(limit);
     Ok(processes)
 }
 
-/// Search processes by name
+/// Search processes by name (async)
 #[tauri::command]
-pub fn search_processes(query: String) -> Result<Vec<ProcessInfo>> {
-    let all_processes = get_processes()?;
+pub async fn search_processes(query: String) -> Result<Vec<ProcessInfo>> {
+    let all_processes = get_processes().await?;
     let query_lower = query.to_lowercase();
 
     let filtered: Vec<ProcessInfo> = all_processes
@@ -105,57 +110,69 @@ pub fn search_processes(query: String) -> Result<Vec<ProcessInfo>> {
     Ok(filtered)
 }
 
-/// Kill a process by PID
+/// Kill a process by PID (async)
 #[tauri::command]
-pub fn kill_process(pid: u32) -> Result<ProcessAction> {
-    let sys = System::new_all();
-    let pid_obj = sysinfo::Pid::from_u32(pid);
+pub async fn kill_process(pid: u32) -> Result<ProcessAction> {
+    let result = tokio::task::spawn_blocking(move || {
+        let sys = System::new_all();
+        let pid_obj = sysinfo::Pid::from_u32(pid);
 
-    if let Some(process) = sys.process(pid_obj) {
-        // Try SIGTERM first
-        if process.kill_with(Signal::Term).is_some() {
-            return Ok(ProcessAction {
-                pid,
-                action: "kill".to_string(),
-                success: true,
-                message: "Process terminated".to_string(),
-            });
+        if let Some(process) = sys.process(pid_obj) {
+            // Try SIGTERM first
+            if process.kill_with(Signal::Term).is_some() {
+                return Ok(ProcessAction {
+                    pid,
+                    action: "kill".to_string(),
+                    success: true,
+                    message: "Process terminated".to_string(),
+                });
+            }
         }
-    }
 
-    // Process doesn't exist or couldn't be killed
-    Err(AppError::CommandFailed(format!(
-        "Failed to kill process {}",
-        pid
-    )))
+        // Process doesn't exist or couldn't be killed
+        Err(AppError::CommandFailed(format!(
+            "Failed to kill process {}",
+            pid
+        )))
+    }).await.unwrap();
+
+    result
 }
 
-/// Force kill a process by PID (SIGKILL)
+/// Force kill a process by PID (SIGKILL) - async
 #[tauri::command]
-pub fn force_kill_process(pid: u32) -> Result<ProcessAction> {
-    let sys = System::new_all();
-    let pid_obj = sysinfo::Pid::from_u32(pid);
+pub async fn force_kill_process(pid: u32) -> Result<ProcessAction> {
+    let result = tokio::task::spawn_blocking(move || {
+        let sys = System::new_all();
+        let pid_obj = sysinfo::Pid::from_u32(pid);
 
-    if let Some(process) = sys.process(pid_obj) {
-        if process.kill_with(Signal::Kill).is_some() {
-            return Ok(ProcessAction {
-                pid,
-                action: "force_kill".to_string(),
-                success: true,
-                message: "Process killed".to_string(),
-            });
+        if let Some(process) = sys.process(pid_obj) {
+            if process.kill_with(Signal::Kill).is_some() {
+                return Ok(ProcessAction {
+                    pid,
+                    action: "force_kill".to_string(),
+                    success: true,
+                    message: "Process killed".to_string(),
+                });
+            }
         }
-    }
 
-    Err(AppError::CommandFailed(format!(
-        "Failed to force kill process {}",
-        pid
-    )))
+        Err(AppError::CommandFailed(format!(
+            "Failed to force kill process {}",
+            pid
+        )))
+    }).await.unwrap();
+
+    result
 }
 
-/// Get process count
+/// Get process count (async)
 #[tauri::command]
-pub fn get_process_count() -> Result<usize> {
-    let sys = System::new_all();
-    Ok(sys.processes().len())
+pub async fn get_process_count() -> Result<usize> {
+    let count = tokio::task::spawn_blocking(|| {
+        let sys = System::new_all();
+        sys.processes().len()
+    }).await.unwrap();
+
+    Ok(count)
 }

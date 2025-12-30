@@ -1,10 +1,10 @@
 //! Package management module
-//! Lists and uninstalls packages using dpkg/apt
+//! Lists and uninstalls packages using dpkg/apt (async)
 
 use crate::error::{AppError, Result};
 use crate::utils::privileged;
 use serde::{Deserialize, Serialize};
-use std::process::Command;
+use tokio::process::Command;
 
 // ============================================================================
 // Data Structures
@@ -28,12 +28,12 @@ pub struct PackageAction {
 }
 
 // ============================================================================
-// Tauri Commands
+// Tauri Commands (All async)
 // ============================================================================
 
-/// Get all installed packages
+/// Get all installed packages (async)
 #[tauri::command]
-pub fn get_packages() -> Result<Vec<PackageInfo>> {
+pub async fn get_packages() -> Result<Vec<PackageInfo>> {
     // Use dpkg-query for comprehensive info
     let output = Command::new("dpkg-query")
         .args([
@@ -42,6 +42,7 @@ pub fn get_packages() -> Result<Vec<PackageInfo>> {
             "${Package}\t${Version}\t${Installed-Size}\t${binary:Summary}\n",
         ])
         .output()
+        .await
         .map_err(|e| AppError::CommandFailed(format!("Failed to run dpkg-query: {}", e)))?;
 
     if !output.status.success() {
@@ -54,6 +55,7 @@ pub fn get_packages() -> Result<Vec<PackageInfo>> {
     let auto_output = Command::new("apt-mark")
         .args(["showauto"])
         .output()
+        .await
         .ok();
 
     let auto_packages: Vec<String> = auto_output
@@ -94,10 +96,10 @@ pub fn get_packages() -> Result<Vec<PackageInfo>> {
     Ok(packages)
 }
 
-/// Search packages by name
+/// Search packages by name (async)
 #[tauri::command]
-pub fn search_packages(query: String) -> Result<Vec<PackageInfo>> {
-    let all_packages = get_packages()?;
+pub async fn search_packages(query: String) -> Result<Vec<PackageInfo>> {
+    let all_packages = get_packages().await?;
     let query_lower = query.to_lowercase();
 
     let filtered: Vec<PackageInfo> = all_packages
@@ -111,9 +113,9 @@ pub fn search_packages(query: String) -> Result<Vec<PackageInfo>> {
     Ok(filtered)
 }
 
-/// Uninstall a package (requires auth)
+/// Uninstall a package (requires auth, async with timeout)
 #[tauri::command]
-pub fn uninstall_package(name: String) -> Result<PackageAction> {
+pub async fn uninstall_package(name: String) -> Result<PackageAction> {
     // Validate package name (prevent injection)
     if !name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '.' || c == '+' || c == ':') {
         return Err(AppError::PermissionDenied(
@@ -121,7 +123,7 @@ pub fn uninstall_package(name: String) -> Result<PackageAction> {
         ));
     }
 
-    let result = privileged::run_privileged("apt-get", &["remove", "-y", &name]);
+    let result = privileged::run_privileged("apt-get", &["remove", "-y", &name]).await;
 
     match result {
         Ok(output) => Ok(PackageAction {
@@ -136,13 +138,19 @@ pub fn uninstall_package(name: String) -> Result<PackageAction> {
             success: false,
             message: "Operation cancelled by user".to_string(),
         }),
+        Err(AppError::Timeout(msg)) => Ok(PackageAction {
+            name,
+            action: "remove".to_string(),
+            success: false,
+            message: msg,
+        }),
         Err(e) => Err(e),
     }
 }
 
-/// Purge a package (remove with config files)
+/// Purge a package (remove with config files, async with timeout)
 #[tauri::command]
-pub fn purge_package(name: String) -> Result<PackageAction> {
+pub async fn purge_package(name: String) -> Result<PackageAction> {
     // Validate package name
     if !name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '.' || c == '+' || c == ':') {
         return Err(AppError::PermissionDenied(
@@ -150,7 +158,7 @@ pub fn purge_package(name: String) -> Result<PackageAction> {
         ));
     }
 
-    let result = privileged::run_privileged("apt-get", &["purge", "-y", &name]);
+    let result = privileged::run_privileged("apt-get", &["purge", "-y", &name]).await;
 
     match result {
         Ok(output) => Ok(PackageAction {
@@ -165,14 +173,20 @@ pub fn purge_package(name: String) -> Result<PackageAction> {
             success: false,
             message: "Operation cancelled by user".to_string(),
         }),
+        Err(AppError::Timeout(msg)) => Ok(PackageAction {
+            name,
+            action: "purge".to_string(),
+            success: false,
+            message: msg,
+        }),
         Err(e) => Err(e),
     }
 }
 
-/// Remove unused dependencies
+/// Remove unused dependencies (async with timeout)
 #[tauri::command]
-pub fn autoremove_packages() -> Result<PackageAction> {
-    let result = privileged::run_privileged("apt-get", &["autoremove", "-y"]);
+pub async fn autoremove_packages() -> Result<PackageAction> {
+    let result = privileged::run_privileged("apt-get", &["autoremove", "-y"]).await;
 
     match result {
         Ok(output) => Ok(PackageAction {
@@ -187,14 +201,20 @@ pub fn autoremove_packages() -> Result<PackageAction> {
             success: false,
             message: "Operation cancelled by user".to_string(),
         }),
+        Err(AppError::Timeout(msg)) => Ok(PackageAction {
+            name: "*".to_string(),
+            action: "autoremove".to_string(),
+            success: false,
+            message: msg,
+        }),
         Err(e) => Err(e),
     }
 }
 
-/// Get package count statistics
+/// Get package count statistics (async)
 #[tauri::command]
-pub fn get_package_stats() -> Result<(usize, usize, u64)> {
-    let packages = get_packages()?;
+pub async fn get_package_stats() -> Result<(usize, usize, u64)> {
+    let packages = get_packages().await?;
 
     let total_count = packages.len();
     let auto_count = packages.iter().filter(|p| p.is_auto).count();

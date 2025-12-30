@@ -1,12 +1,14 @@
 //! APT Repository Manager module
-//! Manages sources.list and PPAs with mirror speed testing
+//! Manages sources.list and PPAs with PARALLEL mirror speed testing
 
 use crate::error::{AppError, Result};
 use crate::utils::privileged;
+use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 use std::time::Instant;
+use tokio::time::{timeout, Duration};
 
 // ============================================================================
 // Data Structures
@@ -132,39 +134,44 @@ fn parse_sources_file(path: &Path) -> Vec<Repository> {
 }
 
 // ============================================================================
-// Tauri Commands
+// Tauri Commands (All async)
 // ============================================================================
 
 /// Get all APT repositories
 #[tauri::command]
-pub fn get_repositories() -> Result<Vec<Repository>> {
-    let mut all_repos = Vec::new();
-    
-    // Parse main sources.list
-    let main_sources = Path::new("/etc/apt/sources.list");
-    if main_sources.exists() {
-        all_repos.extend(parse_sources_file(main_sources));
-    }
-    
-    // Parse sources.list.d/*.list
-    let sources_d = Path::new("/etc/apt/sources.list.d");
-    if sources_d.exists() {
-        if let Ok(entries) = fs::read_dir(sources_d) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().map(|e| e == "list").unwrap_or(false) {
-                    all_repos.extend(parse_sources_file(&path));
+pub async fn get_repositories() -> Result<Vec<Repository>> {
+    // Spawn blocking since this does file I/O
+    let repos = tokio::task::spawn_blocking(|| {
+        let mut all_repos = Vec::new();
+        
+        // Parse main sources.list
+        let main_sources = Path::new("/etc/apt/sources.list");
+        if main_sources.exists() {
+            all_repos.extend(parse_sources_file(main_sources));
+        }
+        
+        // Parse sources.list.d/*.list
+        let sources_d = Path::new("/etc/apt/sources.list.d");
+        if sources_d.exists() {
+            if let Ok(entries) = fs::read_dir(sources_d) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().map(|e| e == "list").unwrap_or(false) {
+                        all_repos.extend(parse_sources_file(&path));
+                    }
                 }
             }
         }
-    }
+        
+        all_repos
+    }).await.unwrap();
     
-    Ok(all_repos)
+    Ok(repos)
 }
 
-/// Toggle repository enabled/disabled
+/// Toggle repository enabled/disabled (async with timeout)
 #[tauri::command]
-pub fn toggle_repository(file_path: String, line_number: usize) -> Result<()> {
+pub async fn toggle_repository(file_path: String, line_number: usize) -> Result<()> {
     let content = fs::read_to_string(&file_path)?;
     let lines: Vec<&str> = content.lines().collect();
     
@@ -192,30 +199,30 @@ pub fn toggle_repository(file_path: String, line_number: usize) -> Result<()> {
         new_content.replace("'", "'\\''"),
         file_path
     );
-    privileged::run_privileged_shell(&script)?;
+    privileged::run_privileged_shell(&script).await?;
     
     Ok(())
 }
 
-/// Add a PPA
+/// Add a PPA (async with timeout)
 #[tauri::command]
-pub fn add_ppa(ppa: String) -> Result<String> {
+pub async fn add_ppa(ppa: String) -> Result<String> {
     // Validate PPA format: ppa:user/repo
     if !ppa.starts_with("ppa:") {
         return Err(AppError::System("Invalid PPA format. Use ppa:user/repo".to_string()));
     }
     
-    privileged::run_privileged("add-apt-repository", &["-y", &ppa])
+    privileged::run_privileged("add-apt-repository", &["-y", &ppa]).await
 }
 
-/// Remove a PPA
+/// Remove a PPA (async with timeout)
 #[tauri::command]
-pub fn remove_ppa(ppa: String) -> Result<String> {
+pub async fn remove_ppa(ppa: String) -> Result<String> {
     if !ppa.starts_with("ppa:") {
         return Err(AppError::System("Invalid PPA format".to_string()));
     }
     
-    privileged::run_privileged("add-apt-repository", &["-r", "-y", &ppa])
+    privileged::run_privileged("add-apt-repository", &["-r", "-y", &ppa]).await
 }
 
 /// Get available mirrors
@@ -238,37 +245,49 @@ pub fn get_mirrors() -> Vec<MirrorInfo> {
         .collect()
 }
 
-/// Test mirror speed (latency)
+/// Test a single mirror speed (async with 5s timeout)
 #[tauri::command]
-pub fn test_mirror_speed(uri: String) -> Result<u64> {
-    use std::process::Command;
-    
+pub async fn test_mirror_speed(uri: String) -> Result<u64> {
     let start = Instant::now();
     
-    // Use curl to test connection
-    let output = Command::new("curl")
-        .args(["-s", "-o", "/dev/null", "-w", "%{time_connect}", "--connect-timeout", "5", &uri])
-        .output()
-        .map_err(|e| AppError::CommandFailed(format!("Failed to test mirror: {}", e)))?;
+    // Use reqwest with timeout for async HTTP
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|e| AppError::Network(format!("Failed to create HTTP client: {}", e)))?;
     
-    if output.status.success() {
-        let time_str = String::from_utf8_lossy(&output.stdout);
-        if let Ok(seconds) = time_str.trim().parse::<f64>() {
-            return Ok((seconds * 1000.0) as u64);
-        }
+    // Just do a HEAD request to measure latency
+    let result = timeout(
+        Duration::from_secs(5),
+        client.head(&uri).send()
+    ).await;
+    
+    match result {
+        Ok(Ok(_)) => Ok(start.elapsed().as_millis() as u64),
+        Ok(Err(e)) => Err(AppError::Network(format!("Mirror unreachable: {}", e))),
+        Err(_) => Err(AppError::Timeout("Mirror test timed out".to_string())),
     }
-    
-    // Fallback: use total elapsed time
-    Ok(start.elapsed().as_millis() as u64)
 }
 
-/// Test all mirrors and return sorted by speed
+/// Test ALL mirrors in PARALLEL and return sorted by speed
 #[tauri::command]
-pub fn test_all_mirrors() -> Vec<MirrorInfo> {
+pub async fn test_all_mirrors() -> Vec<MirrorInfo> {
     let mut mirrors = get_mirrors();
     
-    for mirror in &mut mirrors {
-        mirror.latency_ms = test_mirror_speed(mirror.uri.clone()).ok();
+    // Create futures for all mirror tests
+    let test_futures: Vec<_> = mirrors.iter().map(|m| {
+        let uri = m.uri.clone();
+        async move {
+            test_mirror_speed(uri).await.ok()
+        }
+    }).collect();
+    
+    // Run ALL tests in parallel with join_all
+    let results = join_all(test_futures).await;
+    
+    // Assign results to mirrors
+    for (mirror, latency) in mirrors.iter_mut().zip(results) {
+        mirror.latency_ms = latency;
     }
     
     // Sort by latency (None values at end)
@@ -284,9 +303,9 @@ pub fn test_all_mirrors() -> Vec<MirrorInfo> {
     mirrors
 }
 
-/// Set the fastest mirror as primary
+/// Set the fastest mirror as primary (async with timeout)
 #[tauri::command]
-pub fn set_mirror(new_uri: String) -> Result<String> {
+pub async fn set_mirror(new_uri: String) -> Result<String> {
     let sources_path = "/etc/apt/sources.list";
     let content = fs::read_to_string(sources_path)?;
     
@@ -313,13 +332,13 @@ pub fn set_mirror(new_uri: String) -> Result<String> {
         new_content.replace("'", "'\\''"),
         sources_path
     );
-    privileged::run_privileged_shell(&script)?;
+    privileged::run_privileged_shell(&script).await?;
     
     Ok(format!("Mirror changed to {}", new_uri))
 }
 
-/// Run apt update
+/// Run apt update (async with timeout)
 #[tauri::command]
-pub fn apt_update() -> Result<String> {
-    privileged::run_privileged("apt-get", &["update"])
+pub async fn apt_update() -> Result<String> {
+    privileged::run_privileged("apt-get", &["update"]).await
 }

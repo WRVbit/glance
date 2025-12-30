@@ -428,6 +428,9 @@
 
   // Load page-specific data when page changes
   $effect(() => {
+    // Cleanup function - MANDATORY to prevent interval stacking
+    let intervalId = null;
+
     if (currentPage === "cleaner") loadCleaner();
     else if (currentPage === "tweaks") loadTweaks();
     else if (currentPage === "services") loadServices();
@@ -438,16 +441,21 @@
     else if (currentPage === "hosts") loadHosts();
     else if (currentPage === "resources") {
       loadResources();
-      // Start resource polling
-      if (resourceInterval) clearInterval(resourceInterval);
-      resourceInterval = setInterval(loadResources, 1000);
-    } else {
-      // Stop resource polling when leaving resources page
+      // Start resource polling with local intervalId
+      intervalId = setInterval(loadResources, 1000);
+      resourceInterval = intervalId;
+    }
+
+    // Return cleanup function - this runs when currentPage changes or component unmounts
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
       if (resourceInterval) {
         clearInterval(resourceInterval);
         resourceInterval = null;
       }
-    }
+    };
   });
 
   // Derived values

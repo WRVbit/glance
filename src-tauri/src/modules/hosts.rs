@@ -1,10 +1,11 @@
 //! Hosts File Editor module
-//! Parse and edit /etc/hosts with blocklist support
+//! Parse and edit /etc/hosts with blocklist support (async)
 
 use crate::error::{AppError, Result};
 use crate::utils::privileged;
 use serde::{Deserialize, Serialize};
 use std::fs;
+use tokio::time::Duration;
 
 // ============================================================================
 // Data Structures
@@ -34,7 +35,6 @@ pub struct HostsStats {
 pub const BLOCKLISTS: &[(&str, &str)] = &[
     ("StevenBlack (Unified)", "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"),
     ("AdAway Default", "https://adaway.org/hosts.txt"),
-    ("MalwareDomains", "https://mirror1.malwaredomains.com/files/justdomains"),
     ("MVPS Hosts", "https://winhelp2002.mvps.org/hosts.txt"),
 ];
 
@@ -99,27 +99,31 @@ fn parse_host_line(line: &str, line_number: usize) -> Option<HostEntry> {
 }
 
 // ============================================================================
-// Tauri Commands
+// Tauri Commands (All async)
 // ============================================================================
 
 /// Get all hosts entries
 #[tauri::command]
-pub fn get_hosts() -> Result<Vec<HostEntry>> {
-    let content = fs::read_to_string(HOSTS_PATH)?;
-    
-    let entries: Vec<HostEntry> = content
-        .lines()
-        .enumerate()
-        .filter_map(|(idx, line)| parse_host_line(line, idx + 1))
-        .collect();
+pub async fn get_hosts() -> Result<Vec<HostEntry>> {
+    let entries = tokio::task::spawn_blocking(|| {
+        let content = fs::read_to_string(HOSTS_PATH)?;
+        
+        let entries: Vec<HostEntry> = content
+            .lines()
+            .enumerate()
+            .filter_map(|(idx, line)| parse_host_line(line, idx + 1))
+            .collect();
+        
+        Ok::<_, AppError>(entries)
+    }).await.unwrap()?;
     
     Ok(entries)
 }
 
 /// Get hosts file statistics
 #[tauri::command]
-pub fn get_hosts_stats() -> Result<HostsStats> {
-    let entries = get_hosts()?;
+pub async fn get_hosts_stats() -> Result<HostsStats> {
+    let entries = get_hosts().await?;
     
     let enabled_entries = entries.iter().filter(|e| e.is_enabled).count();
     let blocked_domains = entries
@@ -135,9 +139,9 @@ pub fn get_hosts_stats() -> Result<HostsStats> {
     })
 }
 
-/// Add a new host entry
+/// Add a new host entry (async with timeout)
 #[tauri::command]
-pub fn add_host(ip: String, hostname: String, comment: Option<String>) -> Result<()> {
+pub async fn add_host(ip: String, hostname: String, comment: Option<String>) -> Result<()> {
     // Validate IP
     if !ip.contains('.') && !ip.contains(':') {
         return Err(AppError::System("Invalid IP address".to_string()));
@@ -159,14 +163,14 @@ pub fn add_host(ip: String, hostname: String, comment: Option<String>) -> Result
         entry.replace("'", "'\\''"),
         HOSTS_PATH
     );
-    privileged::run_privileged_shell(&script)?;
+    privileged::run_privileged_shell(&script).await?;
     
     Ok(())
 }
 
-/// Remove a host entry by line number
+/// Remove a host entry by line number (async with timeout)
 #[tauri::command]
-pub fn remove_host(line_number: usize) -> Result<()> {
+pub async fn remove_host(line_number: usize) -> Result<()> {
     let content = fs::read_to_string(HOSTS_PATH)?;
     let lines: Vec<&str> = content.lines().collect();
     
@@ -193,14 +197,14 @@ pub fn remove_host(line_number: usize) -> Result<()> {
         new_content.replace("'", "'\\''"),
         HOSTS_PATH
     );
-    privileged::run_privileged_shell(&script)?;
+    privileged::run_privileged_shell(&script).await?;
     
     Ok(())
 }
 
-/// Toggle host entry enabled/disabled
+/// Toggle host entry enabled/disabled (async with timeout)
 #[tauri::command]
-pub fn toggle_host(line_number: usize) -> Result<()> {
+pub async fn toggle_host(line_number: usize) -> Result<()> {
     let content = fs::read_to_string(HOSTS_PATH)?;
     let lines: Vec<&str> = content.lines().collect();
     
@@ -225,7 +229,7 @@ pub fn toggle_host(line_number: usize) -> Result<()> {
         new_content.replace("'", "'\\''"),
         HOSTS_PATH
     );
-    privileged::run_privileged_shell(&script)?;
+    privileged::run_privileged_shell(&script).await?;
     
     Ok(())
 }
@@ -239,22 +243,27 @@ pub fn get_blocklists() -> Vec<(String, String)> {
         .collect()
 }
 
-/// Import entries from a blocklist URL
+/// Import entries from a blocklist URL (async with progress indication)
 #[tauri::command]
-pub fn import_blocklist(url: String) -> Result<usize> {
-    use std::process::Command;
+pub async fn import_blocklist(url: String) -> Result<usize> {
+    // Download blocklist using reqwest
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|e| AppError::Network(format!("Failed to create HTTP client: {}", e)))?;
     
-    // Download blocklist
-    let output = Command::new("curl")
-        .args(["-s", "-L", "--connect-timeout", "10", &url])
-        .output()
-        .map_err(|e| AppError::CommandFailed(format!("Failed to download blocklist: {}", e)))?;
+    let response = client.get(&url)
+        .send()
+        .await
+        .map_err(|e| AppError::Network(format!("Failed to download blocklist: {}", e)))?;
     
-    if !output.status.success() {
-        return Err(AppError::CommandFailed("Failed to download blocklist".to_string()));
+    if !response.status().is_success() {
+        return Err(AppError::Network("Failed to download blocklist".to_string()));
     }
     
-    let blocklist = String::from_utf8_lossy(&output.stdout);
+    let blocklist = response.text()
+        .await
+        .map_err(|e| AppError::Network(format!("Failed to read blocklist: {}", e)))?;
     
     // Parse and count valid entries
     let valid_entries: Vec<String> = blocklist
@@ -285,14 +294,14 @@ pub fn import_blocklist(url: String) -> Result<usize> {
         entries_text.replace("'", "'\\''"),
         HOSTS_PATH
     );
-    privileged::run_privileged_shell(&script)?;
+    privileged::run_privileged_shell(&script).await?;
     
     Ok(count)
 }
 
-/// Backup hosts file
+/// Backup hosts file (async with timeout)
 #[tauri::command]
-pub fn backup_hosts() -> Result<String> {
+pub async fn backup_hosts() -> Result<String> {
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -300,40 +309,39 @@ pub fn backup_hosts() -> Result<String> {
     
     let backup_path = format!("/etc/hosts.backup.{}", timestamp);
     
-    privileged::run_privileged("cp", &[HOSTS_PATH, &backup_path])?;
+    privileged::run_privileged("cp", &[HOSTS_PATH, &backup_path]).await?;
     
     Ok(backup_path)
 }
 
 /// List available backups
 #[tauri::command]
-pub fn list_hosts_backups() -> Result<Vec<String>> {
-    use std::process::Command;
-    
-    let output = Command::new("ls")
-        .args(["-1", "/etc/"])
-        .output()
-        .map_err(|e| AppError::CommandFailed(format!("Failed to list backups: {}", e)))?;
-    
-    let files = String::from_utf8_lossy(&output.stdout);
-    let backups: Vec<String> = files
-        .lines()
-        .filter(|f| f.starts_with("hosts.backup."))
-        .map(|f| format!("/etc/{}", f))
-        .collect();
+pub async fn list_hosts_backups() -> Result<Vec<String>> {
+    let backups = tokio::task::spawn_blocking(|| {
+        let mut backups = Vec::new();
+        if let Ok(entries) = fs::read_dir("/etc/") {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with("hosts.backup.") {
+                    backups.push(format!("/etc/{}", name));
+                }
+            }
+        }
+        backups
+    }).await.unwrap();
     
     Ok(backups)
 }
 
-/// Restore hosts from backup
+/// Restore hosts from backup (async with timeout)
 #[tauri::command]
-pub fn restore_hosts(backup_path: String) -> Result<()> {
+pub async fn restore_hosts(backup_path: String) -> Result<()> {
     // Validate path
     if !backup_path.starts_with("/etc/hosts.backup.") {
         return Err(AppError::PermissionDenied("Invalid backup path".to_string()));
     }
     
-    privileged::run_privileged("cp", &[&backup_path, HOSTS_PATH])?;
+    privileged::run_privileged("cp", &[&backup_path, HOSTS_PATH]).await?;
     
     Ok(())
 }
