@@ -205,6 +205,10 @@ pub async fn get_tweaks() -> Result<Vec<TweakCategory>> {
         let vfs_cache = read_sys_value("/proc/sys/vm/vfs_cache_pressure");
         let dirty_ratio = read_sys_value("/proc/sys/vm/dirty_ratio");
         let dirty_bg_ratio = read_sys_value("/proc/sys/vm/dirty_background_ratio");
+        
+        // Check ZRAM status
+        let zram_enabled = std::path::Path::new("/sys/block/zram0").exists();
+        let zram_status = if zram_enabled { "enabled" } else { "disabled" };
 
         let swap_rec = get_recommended(&tier, "30", "10", "5");
         let vfs_rec = get_recommended(&tier, "100", "50", "30");
@@ -275,6 +279,21 @@ pub async fn get_tweaks() -> Result<Vec<TweakCategory>> {
                     max_value: Some(25),
                     options: None,
                     tweak_type: "slider".to_string(),
+                },
+                Tweak {
+                    id: "zram".to_string(),
+                    name: "ZRAM Compressed Swap".to_string(),
+                    category: "memory".to_string(),
+                    description: "Compress RAM for extra virtual memory. Great for low-RAM systems.".to_string(),
+                    current_value: zram_status.to_string(),
+                    recommended_value: "enabled".to_string(),
+                    is_applied: zram_enabled,
+                    sysctl_key: None,
+                    file_path: None,
+                    min_value: None,
+                    max_value: None,
+                    options: Some(vec!["disabled".to_string(), "enabled".to_string()]),
+                    tweak_type: "toggle".to_string(),
                 },
             ],
         });
@@ -489,6 +508,40 @@ pub async fn apply_tweak(tweak_id: String, value: String) -> Result<String> {
             );
             privileged::run_privileged_shell(&script).await?;
             Ok(format!("I/O scheduler set to {}", value))
+        }
+
+        // ZRAM Compressed Swap
+        "zram" => {
+            if value == "enabled" {
+                // Enable ZRAM with 50% of RAM using zstd compression
+                let script = r#"
+                    # Load zram module
+                    modprobe zram num_devices=1
+                    
+                    # Get RAM size and calculate 50%
+                    RAM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+                    ZRAM_SIZE=$((RAM_KB * 1024 / 2))
+                    
+                    # Setup zram0 if not already active
+                    if [ ! -e /sys/block/zram0/disksize ] || [ "$(cat /sys/block/zram0/disksize)" = "0" ]; then
+                        echo zstd > /sys/block/zram0/comp_algorithm 2>/dev/null || echo lz4 > /sys/block/zram0/comp_algorithm
+                        echo $ZRAM_SIZE > /sys/block/zram0/disksize
+                        mkswap /dev/zram0
+                        swapon -p 100 /dev/zram0
+                    fi
+                "#;
+                privileged::run_privileged_shell(script).await?;
+                Ok("ZRAM enabled with 50% of RAM using zstd compression".to_string())
+            } else {
+                // Disable ZRAM
+                let script = r#"
+                    swapoff /dev/zram0 2>/dev/null
+                    echo 1 > /sys/block/zram0/reset 2>/dev/null
+                    rmmod zram 2>/dev/null || true
+                "#;
+                privileged::run_privileged_shell(script).await?;
+                Ok("ZRAM disabled".to_string())
+            }
         }
 
         _ => Err(AppError::System(format!("Unknown tweak: {}", tweak_id))),

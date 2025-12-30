@@ -6,6 +6,61 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 // ============================================================================
+// Mock Mode Helpers
+// ============================================================================
+
+/// Check if we're in mock/simulation mode
+pub fn is_mock_mode() -> bool {
+    std::env::var("FORCE_DISTRO").is_ok()
+}
+
+/// Generate mock package data for simulation mode
+pub fn generate_mock_packages(pm_name: &str) -> Vec<PackageInfo> {
+    vec![
+        PackageInfo {
+            name: "base-system".to_string(),
+            version: "1.0.0".to_string(),
+            size_bytes: 50 * 1024 * 1024,
+            description: "Base system package (mock)".to_string(),
+            is_auto: false,
+            category: "System".to_string(),
+        },
+        PackageInfo {
+            name: format!("{}-test", pm_name),
+            version: "2.5.1".to_string(),
+            size_bytes: 10 * 1024 * 1024,
+            description: "Test package for simulation".to_string(),
+            is_auto: true,
+            category: "System".to_string(),
+        },
+        PackageInfo {
+            name: "gnome-shell".to_string(),
+            version: "45.0".to_string(),
+            size_bytes: 25 * 1024 * 1024,
+            description: "GNOME desktop shell".to_string(),
+            is_auto: false,
+            category: "GNOME".to_string(),
+        },
+        PackageInfo {
+            name: "firefox".to_string(),
+            version: "120.0".to_string(),
+            size_bytes: 80 * 1024 * 1024,
+            description: "Mozilla Firefox web browser".to_string(),
+            is_auto: false,
+            category: "Internet".to_string(),
+        },
+        PackageInfo {
+            name: "vim".to_string(),
+            version: "9.0".to_string(),
+            size_bytes: 3 * 1024 * 1024,
+            description: "Vi IMproved text editor".to_string(),
+            is_auto: false,
+            category: "Development".to_string(),
+        },
+    ]
+}
+
+// ============================================================================
 // Data Structures (Shared across all adapters)
 // ============================================================================
 

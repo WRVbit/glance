@@ -28,7 +28,7 @@ impl PackageManager for SuseAdapter {
     }
     
     fn cache_path(&self) -> &'static str {
-        "/var/cache/zypper"
+        "/var/cache/zypp"
     }
     
     fn log_path(&self) -> &'static str {
@@ -36,17 +36,16 @@ impl PackageManager for SuseAdapter {
     }
     
     async fn refresh_repositories(&self) -> Result<String> {
-        let result = privileged::run_privileged(&["zypper", "refresh"])
-            .map_err(|e| AppError::CommandFailed(e))?;
-        
-        if result.success {
-            Ok("Package database refreshed".to_string())
-        } else {
-            Err(AppError::CommandFailed(result.stderr))
-        }
+        privileged::run_privileged("zypper", &["refresh"]).await
     }
     
     async fn get_installed_packages(&self) -> Result<Vec<PackageInfo>> {
+        // Return mock data in simulation mode
+        if super::is_mock_mode() {
+            log::info!("[MOCK] Returning mock package data for openSUSE");
+            return Ok(super::generate_mock_packages("zypper"));
+        }
+        
         // Get all installed packages using rpm (shared with Fedora)
         let output = Command::new("rpm")
             .args(["-qa", "--queryformat", "%{NAME}\t%{VERSION}-%{RELEASE}\t%{SIZE}\t%{SUMMARY}\n"])
@@ -97,18 +96,13 @@ impl PackageManager for SuseAdapter {
     }
     
     async fn uninstall_package(&self, name: &str) -> Result<PackageAction> {
-        let result = privileged::run_privileged(&["zypper", "remove", "-y", name])
-            .map_err(|e| AppError::CommandFailed(e))?;
+        let result = privileged::run_privileged("zypper", &["remove", "-y", name]).await;
         
         Ok(PackageAction {
             name: name.to_string(),
             action: "uninstall".to_string(),
-            success: result.success,
-            message: if result.success {
-                format!("Package {} removed", name)
-            } else {
-                result.stderr
-            },
+            success: result.is_ok(),
+            message: result.unwrap_or_else(|e| e.to_string()),
         })
     }
     
@@ -118,36 +112,26 @@ impl PackageManager for SuseAdapter {
     }
     
     async fn autoremove(&self) -> Result<PackageAction> {
-        // zypper packages --unneeded
-        let result = privileged::run_privileged(&["zypper", "remove", "-y", "--clean-deps"])
-            .map_err(|e| AppError::CommandFailed(e))?;
+        // zypper packages --unneeded then remove
+        let result = privileged::run_privileged("zypper", &["remove", "-y", "--clean-deps"]).await;
         
         Ok(PackageAction {
             name: "autoremove".to_string(),
             action: "autoremove".to_string(),
-            success: result.success,
-            message: if result.success {
-                "Unused packages removed".to_string()
-            } else {
-                result.stderr
-            },
+            success: result.is_ok(),
+            message: result.unwrap_or_else(|e| e.to_string()),
         })
     }
     
     async fn clean_cache(&self) -> Result<CleanupResult> {
-        let result = privileged::run_privileged(&["zypper", "clean", "--all"])
-            .map_err(|e| AppError::CommandFailed(e))?;
+        let result = privileged::run_privileged("zypper", &["clean", "--all"]).await;
         
         Ok(CleanupResult {
             category: "zypper_cache".to_string(),
             items_removed: 0,
             bytes_freed: 0,
-            success: result.success,
-            message: if result.success {
-                "Zypper cache cleaned".to_string()
-            } else {
-                result.stderr
-            },
+            success: result.is_ok(),
+            message: result.unwrap_or_else(|e| e.to_string()),
         })
     }
     

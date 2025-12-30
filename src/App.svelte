@@ -26,6 +26,11 @@
   let diskStats = $state([]);
   let distroInfo = $state(null);
 
+  // Distro-specific
+  let pmName = $state("apt"); // Package manager name
+  let distroFamily = $state("Debian/Ubuntu");
+  let repositoriesAvailable = $state(true); // APT repos only on Debian
+
   // Cleaner
   let cleanupCategories = $state([]);
   let totalReclaimable = $state(0);
@@ -181,6 +186,15 @@
           systemService.getDiskStats(),
           systemService.getDistroInfo(),
         ]);
+
+      // Load distro-specific info
+      try {
+        pmName = await invoke("get_pm_name");
+        distroFamily = await invoke("get_distro_family");
+        repositoriesAvailable = await invoke("is_repositories_available");
+      } catch (e) {
+        console.warn("Failed to load distro info:", e);
+      }
     } catch (e) {
       console.error("Failed to load dashboard:", e);
     }
@@ -1228,6 +1242,32 @@
                           {/if}
                         {/each}
                       </div>
+                    {:else if tweak.tweak_type === "toggle"}
+                      <!-- Toggle Switch (for ZRAM etc) -->
+                      <div class="flex gap-2">
+                        <button
+                          class="flex-1 py-3 rounded-lg text-center transition-all {tweak.current_value ===
+                          'enabled'
+                            ? 'bg-success-600 text-white ring-2 ring-success-400'
+                            : 'bg-surface-700 text-gray-300 hover:bg-surface-600'}"
+                          disabled={applyingTweak === tweak.id}
+                          onclick={() => handleApplyTweak(tweak.id, "enabled")}
+                        >
+                          <div class="text-xl">✓</div>
+                          <div class="text-sm font-medium">Enabled</div>
+                        </button>
+                        <button
+                          class="flex-1 py-3 rounded-lg text-center transition-all {tweak.current_value ===
+                          'disabled'
+                            ? 'bg-danger-600 text-white ring-2 ring-danger-400'
+                            : 'bg-surface-700 text-gray-300 hover:bg-surface-600'}"
+                          disabled={applyingTweak === tweak.id}
+                          onclick={() => handleApplyTweak(tweak.id, "disabled")}
+                        >
+                          <div class="text-xl">✕</div>
+                          <div class="text-sm font-medium">Disabled</div>
+                        </button>
+                      </div>
                     {:else}
                       <!-- Fallback: Simple Apply Button -->
                       <button
@@ -1546,196 +1586,210 @@
       {:else if currentPage === "repositories"}
         <!-- Repositories -->
         <div class="space-y-6">
-          <!-- apt-fast Card -->
-          <div
-            class="card bg-gradient-to-r from-primary-900/50 to-accent-900/50 border border-primary-500/30"
-          >
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-3">
-                <span class="text-3xl">🚀</span>
-                <div>
-                  <h3 class="font-semibold">apt-fast</h3>
-                  <p class="text-sm text-gray-400">
-                    Parallel downloads for faster package installation
-                  </p>
-                </div>
-              </div>
-              {#if aptFastStatus.installed}
-                <div class="flex items-center gap-3">
-                  <span class="badge badge-success">Installed</span>
-                  <span class="text-sm text-gray-400"
-                    >{aptFastStatus.max_connections} connections</span
-                  >
-                </div>
-              {:else}
-                <button
-                  class="btn btn-primary"
-                  onclick={handleInstallAptFast}
-                  disabled={installingAptFast}
-                >
-                  {#if installingAptFast}
-                    <span class="spinner"></span> Installing...
-                  {:else}
-                    Install apt-fast
-                  {/if}
-                </button>
-              {/if}
-            </div>
-          </div>
-
-          <div class="card">
-            <h3 class="font-semibold mb-4">Manage Repositories</h3>
-
-            <!-- PPA Input -->
-            <div class="flex gap-4 mb-6">
-              <input
-                type="text"
-                class="input flex-1"
-                placeholder="Add PPA (e.g. ppa:user/repo)..."
-                bind:value={newPpa}
-              />
-              <button class="btn btn-primary" onclick={handleAddPpa}
-                >Add PPA</button
-              >
-            </div>
-
-            <!-- Mirrors -->
-            <div class="border-t border-white/10 pt-6">
-              <div class="flex items-center justify-between mb-4">
-                <div class="flex items-center gap-4">
-                  <h4 class="font-medium">Ubuntu Mirrors</h4>
-                  <!-- Region Dropdown -->
-                  <select
-                    class="bg-surface-800 text-white border border-white/20 rounded-lg px-4 py-2 text-sm cursor-pointer hover:border-primary-500 focus:border-primary-500 focus:outline-none"
-                    bind:value={selectedRegion}
-                    onchange={(e) => handleRegionChange(e.currentTarget.value)}
-                  >
-                    <option value="ALL">🌍 All Regions</option>
-                    {#each regionInfo.available_regions as [code, name]}
-                      <option value={code}>{name} ({code})</option>
-                    {/each}
-                  </select>
-                  {#if regionInfo.detected_code}
-                    <span class="text-xs text-gray-500">
-                      Detected: {regionInfo.detected_country}
-                    </span>
-                  {/if}
-                </div>
-                <button
-                  class="btn btn-secondary btn-sm"
-                  disabled={testingMirrors}
-                  onclick={handleTestMirrors}
-                >
-                  {#if testingMirrors}
-                    <span class="spinner w-4 h-4 mr-2"></span> Testing...
-                  {:else}
-                    Test Speeds
-                  {/if}
-                </button>
-              </div>
-
-              <div class="grid grid-cols-2 gap-2 max-h-60 overflow-y-auto">
-                {#each mirrors as mirror}
-                  <button
-                    class="flex items-center justify-between p-3 bg-surface-800 hover:bg-surface-700 rounded-lg text-left transition-all"
-                    onclick={() => handleSetMirror(mirror.uri)}
-                  >
-                    <div class="flex flex-col min-w-0">
-                      <span class="text-sm font-medium truncate"
-                        >{mirror.name}</span
-                      >
-                      <span class="text-xs text-gray-500 truncate"
-                        >{mirror.uri}</span
-                      >
-                    </div>
-                    <div class="flex items-center gap-2 ml-2 shrink-0">
-                      <span class="text-xs text-gray-400"
-                        >{mirror.country_code}</span
-                      >
-                      {#if mirror.latency_ms !== null}
-                        <span
-                          class="text-xs font-mono px-2 py-0.5 rounded {mirror.latency_ms <
-                          100
-                            ? 'bg-green-500/20 text-green-400'
-                            : mirror.latency_ms < 300
-                              ? 'bg-yellow-500/20 text-yellow-400'
-                              : 'bg-red-500/20 text-red-400'}"
-                        >
-                          {mirror.latency_ms}ms
-                        </span>
-                      {/if}
-                    </div>
-                  </button>
-                {/each}
-              </div>
-              {#if mirrors.length === 0}
-                <p class="text-center text-gray-500 py-4">
-                  No mirrors for selected region
-                </p>
-              {/if}
-            </div>
-          </div>
-
-          <!-- Repo List -->
-          {#if loadingRepos}
-            <div class="flex justify-center py-8">
-              <div class="spinner w-8 h-8"></div>
+          {#if !repositoriesAvailable}
+            <!-- Not available on this distro -->
+            <div class="card text-center py-12">
+              <span class="text-5xl mb-4 block">🚫</span>
+              <h2 class="text-xl font-semibold mb-2">Not Available</h2>
+              <p class="text-gray-400">
+                APT Repository Manager is only available on Debian/Ubuntu based
+                systems.
+              </p>
+              <p class="text-gray-500 text-sm mt-2">Detected: {distroFamily}</p>
             </div>
           {:else}
-            <div class="space-y-2">
-              {#each repositories as repo}
-                <div class="list-item">
-                  <div class="flex-1">
-                    <div class="flex items-center gap-2">
-                      <span class="font-medium">{repo.repo_type}</span>
-                      {#if repo.is_ppa}
-                        <span class="badge badge-accent">PPA</span>
-                      {/if}
-                      <span class="text-sm text-gray-400">{repo.suite}</span>
-                    </div>
-                    <p class="text-xs text-gray-500 mt-1 truncate">
-                      {repo.uri}
+            <!-- apt-fast Card -->
+            <div
+              class="card bg-gradient-to-r from-primary-900/50 to-accent-900/50 border border-primary-500/30"
+            >
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                  <span class="text-3xl">🚀</span>
+                  <div>
+                    <h3 class="font-semibold">apt-fast</h3>
+                    <p class="text-sm text-gray-400">
+                      Parallel downloads for faster package installation
                     </p>
-                    <p class="text-xs text-gray-600 truncate">
-                      {repo.components.join(" ")}
-                    </p>
-                  </div>
-                  <div class="flex items-center gap-2">
-                    <button
-                      class="toggle"
-                      class:bg-primary-600={repo.is_enabled}
-                      class:bg-surface-700={!repo.is_enabled}
-                      aria-label="Toggle repository"
-                      onclick={() =>
-                        invoke("toggle_repository", {
-                          filePath: repo.file_path,
-                          lineNumber: repo.line_number,
-                        }).then(loadRepositories)}
-                    >
-                      <span
-                        class="toggle-dot"
-                        class:translate-x-5={repo.is_enabled}
-                        class:translate-x-1={!repo.is_enabled}
-                      ></span>
-                    </button>
-                    {#if repo.is_ppa}
-                      <button
-                        class="btn btn-danger btn-sm"
-                        disabled={deletingRepo === repo.file_path}
-                        onclick={() => handleDeleteRepo(repo.file_path, true)}
-                        aria-label="Delete repository"
-                      >
-                        {#if deletingRepo === repo.file_path}
-                          <span class="spinner w-3 h-3"></span>
-                        {:else}
-                          🗑️
-                        {/if}
-                      </button>
-                    {/if}
                   </div>
                 </div>
-              {/each}
+                {#if aptFastStatus.installed}
+                  <div class="flex items-center gap-3">
+                    <span class="badge badge-success">Installed</span>
+                    <span class="text-sm text-gray-400"
+                      >{aptFastStatus.max_connections} connections</span
+                    >
+                  </div>
+                {:else}
+                  <button
+                    class="btn btn-primary"
+                    onclick={handleInstallAptFast}
+                    disabled={installingAptFast}
+                  >
+                    {#if installingAptFast}
+                      <span class="spinner"></span> Installing...
+                    {:else}
+                      Install apt-fast
+                    {/if}
+                  </button>
+                {/if}
+              </div>
             </div>
+
+            <div class="card">
+              <h3 class="font-semibold mb-4">Manage Repositories</h3>
+
+              <!-- PPA Input -->
+              <div class="flex gap-4 mb-6">
+                <input
+                  type="text"
+                  class="input flex-1"
+                  placeholder="Add PPA (e.g. ppa:user/repo)..."
+                  bind:value={newPpa}
+                />
+                <button class="btn btn-primary" onclick={handleAddPpa}
+                  >Add PPA</button
+                >
+              </div>
+
+              <!-- Mirrors -->
+              <div class="border-t border-white/10 pt-6">
+                <div class="flex items-center justify-between mb-4">
+                  <div class="flex items-center gap-4">
+                    <h4 class="font-medium">{distroFamily} Mirrors</h4>
+                    <!-- Region Dropdown -->
+                    <select
+                      class="bg-surface-800 text-white border border-white/20 rounded-lg px-4 py-2 text-sm cursor-pointer hover:border-primary-500 focus:border-primary-500 focus:outline-none"
+                      bind:value={selectedRegion}
+                      onchange={(e) =>
+                        handleRegionChange(e.currentTarget.value)}
+                    >
+                      <option value="ALL">🌍 All Regions</option>
+                      {#each regionInfo.available_regions as [code, name]}
+                        <option value={code}>{name} ({code})</option>
+                      {/each}
+                    </select>
+                    {#if regionInfo.detected_code}
+                      <span class="text-xs text-gray-500">
+                        Detected: {regionInfo.detected_country}
+                      </span>
+                    {/if}
+                  </div>
+                  <button
+                    class="btn btn-secondary btn-sm"
+                    disabled={testingMirrors}
+                    onclick={handleTestMirrors}
+                  >
+                    {#if testingMirrors}
+                      <span class="spinner w-4 h-4 mr-2"></span> Testing...
+                    {:else}
+                      Test Speeds
+                    {/if}
+                  </button>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2 max-h-60 overflow-y-auto">
+                  {#each mirrors as mirror}
+                    <button
+                      class="flex items-center justify-between p-3 bg-surface-800 hover:bg-surface-700 rounded-lg text-left transition-all"
+                      onclick={() => handleSetMirror(mirror.uri)}
+                    >
+                      <div class="flex flex-col min-w-0">
+                        <span class="text-sm font-medium truncate"
+                          >{mirror.name}</span
+                        >
+                        <span class="text-xs text-gray-500 truncate"
+                          >{mirror.uri}</span
+                        >
+                      </div>
+                      <div class="flex items-center gap-2 ml-2 shrink-0">
+                        <span class="text-xs text-gray-400"
+                          >{mirror.country_code}</span
+                        >
+                        {#if mirror.latency_ms !== null}
+                          <span
+                            class="text-xs font-mono px-2 py-0.5 rounded {mirror.latency_ms <
+                            100
+                              ? 'bg-green-500/20 text-green-400'
+                              : mirror.latency_ms < 300
+                                ? 'bg-yellow-500/20 text-yellow-400'
+                                : 'bg-red-500/20 text-red-400'}"
+                          >
+                            {mirror.latency_ms}ms
+                          </span>
+                        {/if}
+                      </div>
+                    </button>
+                  {/each}
+                </div>
+                {#if mirrors.length === 0}
+                  <p class="text-center text-gray-500 py-4">
+                    No mirrors for selected region
+                  </p>
+                {/if}
+              </div>
+            </div>
+
+            <!-- Repo List -->
+            {#if loadingRepos}
+              <div class="flex justify-center py-8">
+                <div class="spinner w-8 h-8"></div>
+              </div>
+            {:else}
+              <div class="space-y-2">
+                {#each repositories as repo}
+                  <div class="list-item">
+                    <div class="flex-1">
+                      <div class="flex items-center gap-2">
+                        <span class="font-medium">{repo.repo_type}</span>
+                        {#if repo.is_ppa}
+                          <span class="badge badge-accent">PPA</span>
+                        {/if}
+                        <span class="text-sm text-gray-400">{repo.suite}</span>
+                      </div>
+                      <p class="text-xs text-gray-500 mt-1 truncate">
+                        {repo.uri}
+                      </p>
+                      <p class="text-xs text-gray-600 truncate">
+                        {repo.components.join(" ")}
+                      </p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <button
+                        class="toggle"
+                        class:bg-primary-600={repo.is_enabled}
+                        class:bg-surface-700={!repo.is_enabled}
+                        aria-label="Toggle repository"
+                        onclick={() =>
+                          invoke("toggle_repository", {
+                            filePath: repo.file_path,
+                            lineNumber: repo.line_number,
+                          }).then(loadRepositories)}
+                      >
+                        <span
+                          class="toggle-dot"
+                          class:translate-x-5={repo.is_enabled}
+                          class:translate-x-1={!repo.is_enabled}
+                        ></span>
+                      </button>
+                      {#if repo.is_ppa}
+                        <button
+                          class="btn btn-danger btn-sm"
+                          disabled={deletingRepo === repo.file_path}
+                          onclick={() => handleDeleteRepo(repo.file_path, true)}
+                          aria-label="Delete repository"
+                        >
+                          {#if deletingRepo === repo.file_path}
+                            <span class="spinner w-3 h-3"></span>
+                          {:else}
+                            🗑️
+                          {/if}
+                        </button>
+                      {/if}
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            {/if}
           {/if}
         </div>
       {:else if currentPage === "resources"}

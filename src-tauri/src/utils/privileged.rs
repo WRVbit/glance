@@ -11,16 +11,27 @@ const PKEXEC_TIMEOUT_SECS: u64 = 30;
 
 /// Whitelist of allowed commands for privileged execution
 const ALLOWED_COMMANDS: &[&str] = &[
+    // System
     "sysctl",
     "journalctl",
-    "apt",
-    "apt-get",
     "systemctl",
     "rm",
     "bash",
-    "add-apt-repository",
     "cp",
     "tee",
+    // Debian/Ubuntu
+    "apt",
+    "apt-get",
+    "apt-fast",
+    "add-apt-repository",
+    // Arch
+    "pacman",
+    "paccache",
+    // Fedora
+    "dnf",
+    "rpm",
+    // OpenSUSE
+    "zypper",
 ];
 
 /// Execute a command with root privileges via pkexec (async with timeout)
@@ -29,6 +40,9 @@ const ALLOWED_COMMANDS: &[&str] = &[
 /// - Only whitelisted commands are allowed
 /// - Uses pkexec for GUI-friendly authentication
 /// - 30 second timeout to prevent app freeze if user ignores dialog
+/// 
+/// # Mock Mode
+/// When FORCE_DISTRO env var is set, commands are logged but not executed
 pub async fn run_privileged(cmd: &str, args: &[&str]) -> Result<String> {
     // Validate command is whitelisted
     if !ALLOWED_COMMANDS.contains(&cmd) {
@@ -36,6 +50,14 @@ pub async fn run_privileged(cmd: &str, args: &[&str]) -> Result<String> {
             "Command '{}' is not in the allowed list",
             cmd
         )));
+    }
+    
+    // Check for mock mode (FORCE_DISTRO set)
+    if std::env::var("FORCE_DISTRO").is_ok() {
+        let mock_cmd = format!("pkexec {} {}", cmd, args.join(" "));
+        log::info!("[MOCK EXEC] Would run: {}", mock_cmd);
+        println!("[MOCK EXEC] Would run: {}", mock_cmd);
+        return Ok(format!("Mock Success: {}", mock_cmd));
     }
 
     // Spawn the pkexec process
@@ -79,6 +101,13 @@ pub async fn run_privileged_shell(script: &str) -> Result<String> {
                 pattern
             )));
         }
+    }
+    
+    // Check for mock mode (FORCE_DISTRO set)
+    if std::env::var("FORCE_DISTRO").is_ok() {
+        log::info!("[MOCK EXEC] Would run shell: {}", script);
+        println!("[MOCK EXEC] Would run shell: {}", script);
+        return Ok(format!("Mock Success: shell script"));
     }
 
     // Spawn the pkexec bash process

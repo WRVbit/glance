@@ -24,15 +24,6 @@ impl DebianAdapter {
             .map(|o| o.status.success())
             .unwrap_or(false)
     }
-    
-    /// Get the apt command (apt-fast if available, otherwise apt-get)
-    async fn apt_cmd(&self) -> &'static str {
-        if self.has_apt_fast().await {
-            "apt-fast"
-        } else {
-            "apt-get"
-        }
-    }
 }
 
 impl Default for DebianAdapter {
@@ -56,19 +47,17 @@ impl PackageManager for DebianAdapter {
     }
     
     async fn refresh_repositories(&self) -> Result<String> {
-        let apt = self.apt_cmd().await;
-        
-        let result = privileged::run_privileged(&[apt, "update"])
-            .map_err(|e| AppError::CommandFailed(e))?;
-        
-        if result.success {
-            Ok("Package database updated successfully".to_string())
-        } else {
-            Err(AppError::CommandFailed(result.stderr))
-        }
+        let apt = if self.has_apt_fast().await { "apt-fast" } else { "apt-get" };
+        privileged::run_privileged(apt, &["update"]).await
     }
     
     async fn get_installed_packages(&self) -> Result<Vec<PackageInfo>> {
+        // Return mock data in simulation mode
+        if super::is_mock_mode() {
+            log::info!("[MOCK] Returning mock package data for Debian");
+            return Ok(super::generate_mock_packages("apt"));
+        }
+        
         // Get auto-installed packages first
         let auto_output = Command::new("apt-mark")
             .arg("showauto")
@@ -136,67 +125,47 @@ impl PackageManager for DebianAdapter {
     }
     
     async fn uninstall_package(&self, name: &str) -> Result<PackageAction> {
-        let result = privileged::run_privileged(&["apt-get", "remove", "-y", name])
-            .map_err(|e| AppError::CommandFailed(e))?;
+        let result = privileged::run_privileged("apt-get", &["remove", "-y", name]).await;
         
         Ok(PackageAction {
             name: name.to_string(),
             action: "uninstall".to_string(),
-            success: result.success,
-            message: if result.success {
-                format!("Package {} removed", name)
-            } else {
-                result.stderr
-            },
+            success: result.is_ok(),
+            message: result.unwrap_or_else(|e| e.to_string()),
         })
     }
     
     async fn purge_package(&self, name: &str) -> Result<PackageAction> {
-        let result = privileged::run_privileged(&["apt-get", "purge", "-y", name])
-            .map_err(|e| AppError::CommandFailed(e))?;
+        let result = privileged::run_privileged("apt-get", &["purge", "-y", name]).await;
         
         Ok(PackageAction {
             name: name.to_string(),
             action: "purge".to_string(),
-            success: result.success,
-            message: if result.success {
-                format!("Package {} purged", name)
-            } else {
-                result.stderr
-            },
+            success: result.is_ok(),
+            message: result.unwrap_or_else(|e| e.to_string()),
         })
     }
     
     async fn autoremove(&self) -> Result<PackageAction> {
-        let result = privileged::run_privileged(&["apt-get", "autoremove", "-y"])
-            .map_err(|e| AppError::CommandFailed(e))?;
+        let result = privileged::run_privileged("apt-get", &["autoremove", "-y"]).await;
         
         Ok(PackageAction {
             name: "autoremove".to_string(),
             action: "autoremove".to_string(),
-            success: result.success,
-            message: if result.success {
-                "Unused packages removed".to_string()
-            } else {
-                result.stderr
-            },
+            success: result.is_ok(),
+            message: result.unwrap_or_else(|e| e.to_string()),
         })
     }
     
     async fn clean_cache(&self) -> Result<CleanupResult> {
-        let result = privileged::run_privileged(&["apt-get", "clean"])
-            .map_err(|e| AppError::CommandFailed(e))?;
+        let result = privileged::run_privileged("apt-get", &["clean"]).await;
         
         Ok(CleanupResult {
             category: "apt_cache".to_string(),
-            items_removed: 0, // apt clean doesn't report count
-            bytes_freed: 0,   // Would need to calculate before/after
-            success: result.success,
-            message: if result.success {
-                "APT cache cleaned".to_string()
-            } else {
-                result.stderr
-            },
+            items_removed: 0,
+            bytes_freed: 0,
+            success: result.is_ok(),
+            message: result.unwrap_or_else(|e| e.to_string()),
         })
     }
     

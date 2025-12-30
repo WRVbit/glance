@@ -5,6 +5,7 @@ use super::{PackageInfo, PackageAction, CleanupResult, PackageManager, detect_pa
 use crate::error::{AppError, Result};
 use crate::utils::privileged;
 use async_trait::async_trait;
+use std::collections::HashSet;
 use tokio::process::Command;
 
 pub struct FedoraAdapter;
@@ -36,14 +37,18 @@ impl PackageManager for FedoraAdapter {
     }
     
     async fn refresh_repositories(&self) -> Result<String> {
-        let result = privileged::run_privileged(&["dnf", "check-update", "-y"])
-            .map_err(|e| AppError::CommandFailed(e))?;
-        
-        // dnf check-update returns 100 if updates available, 0 if none
+        // dnf check-update returns 100 if updates available, 0 if none - both are OK
+        let _ = privileged::run_privileged("dnf", &["check-update", "-y"]).await;
         Ok("Package database updated".to_string())
     }
     
     async fn get_installed_packages(&self) -> Result<Vec<PackageInfo>> {
+        // Return mock data in simulation mode
+        if super::is_mock_mode() {
+            log::info!("[MOCK] Returning mock package data for Fedora");
+            return Ok(super::generate_mock_packages("dnf"));
+        }
+        
         // Get all installed packages with detailed info
         let output = Command::new("rpm")
             .args(["-qa", "--queryformat", "%{NAME}\t%{VERSION}-%{RELEASE}\t%{SIZE}\t%{SUMMARY}\n"])
@@ -58,7 +63,7 @@ impl PackageManager for FedoraAdapter {
             .await
             .ok();
         
-        let user_packages: std::collections::HashSet<String> = userinstalled
+        let user_packages: HashSet<String> = userinstalled
             .map(|o| {
                 String::from_utf8_lossy(&o.stdout)
                     .lines()
@@ -110,18 +115,13 @@ impl PackageManager for FedoraAdapter {
     }
     
     async fn uninstall_package(&self, name: &str) -> Result<PackageAction> {
-        let result = privileged::run_privileged(&["dnf", "remove", "-y", name])
-            .map_err(|e| AppError::CommandFailed(e))?;
+        let result = privileged::run_privileged("dnf", &["remove", "-y", name]).await;
         
         Ok(PackageAction {
             name: name.to_string(),
             action: "uninstall".to_string(),
-            success: result.success,
-            message: if result.success {
-                format!("Package {} removed", name)
-            } else {
-                result.stderr
-            },
+            success: result.is_ok(),
+            message: result.unwrap_or_else(|e| e.to_string()),
         })
     }
     
@@ -131,35 +131,25 @@ impl PackageManager for FedoraAdapter {
     }
     
     async fn autoremove(&self) -> Result<PackageAction> {
-        let result = privileged::run_privileged(&["dnf", "autoremove", "-y"])
-            .map_err(|e| AppError::CommandFailed(e))?;
+        let result = privileged::run_privileged("dnf", &["autoremove", "-y"]).await;
         
         Ok(PackageAction {
             name: "autoremove".to_string(),
             action: "autoremove".to_string(),
-            success: result.success,
-            message: if result.success {
-                "Unused packages removed".to_string()
-            } else {
-                result.stderr
-            },
+            success: result.is_ok(),
+            message: result.unwrap_or_else(|e| e.to_string()),
         })
     }
     
     async fn clean_cache(&self) -> Result<CleanupResult> {
-        let result = privileged::run_privileged(&["dnf", "clean", "all"])
-            .map_err(|e| AppError::CommandFailed(e))?;
+        let result = privileged::run_privileged("dnf", &["clean", "all"]).await;
         
         Ok(CleanupResult {
             category: "dnf_cache".to_string(),
             items_removed: 0,
             bytes_freed: 0,
-            success: result.success,
-            message: if result.success {
-                "DNF cache cleaned".to_string()
-            } else {
-                result.stderr
-            },
+            success: result.is_ok(),
+            message: result.unwrap_or_else(|e| e.to_string()),
         })
     }
     

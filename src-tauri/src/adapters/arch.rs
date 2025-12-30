@@ -5,6 +5,7 @@ use super::{PackageInfo, PackageAction, CleanupResult, PackageManager, detect_pa
 use crate::error::{AppError, Result};
 use crate::utils::privileged;
 use async_trait::async_trait;
+use std::collections::HashSet;
 use tokio::process::Command;
 
 pub struct ArchAdapter;
@@ -22,6 +23,25 @@ impl ArchAdapter {
             .await
             .map(|o| o.status.success())
             .unwrap_or(false)
+    }
+    
+    /// Parse size string like "12.5 MiB" to bytes
+    fn parse_size(size_str: &str) -> u64 {
+        let parts: Vec<&str> = size_str.split_whitespace().collect();
+        if parts.len() < 2 {
+            return 0;
+        }
+        
+        let num: f64 = parts[0].parse().unwrap_or(0.0);
+        let unit = parts[1].to_lowercase();
+        
+        match unit.as_str() {
+            "b" => num as u64,
+            "kib" | "kb" => (num * 1024.0) as u64,
+            "mib" | "mb" => (num * 1024.0 * 1024.0) as u64,
+            "gib" | "gb" => (num * 1024.0 * 1024.0 * 1024.0) as u64,
+            _ => 0,
+        }
     }
 }
 
@@ -46,17 +66,16 @@ impl PackageManager for ArchAdapter {
     }
     
     async fn refresh_repositories(&self) -> Result<String> {
-        let result = privileged::run_privileged(&["pacman", "-Sy"])
-            .map_err(|e| AppError::CommandFailed(e))?;
-        
-        if result.success {
-            Ok("Package database synchronized".to_string())
-        } else {
-            Err(AppError::CommandFailed(result.stderr))
-        }
+        privileged::run_privileged("pacman", &["-Sy"]).await
     }
     
     async fn get_installed_packages(&self) -> Result<Vec<PackageInfo>> {
+        // Return mock data in simulation mode
+        if super::is_mock_mode() {
+            log::info!("[MOCK] Returning mock package data for Arch");
+            return Ok(super::generate_mock_packages("pacman"));
+        }
+        
         // Get explicitly installed packages
         let explicit_output = Command::new("pacman")
             .args(["-Qe", "-q"])
@@ -64,7 +83,7 @@ impl PackageManager for ArchAdapter {
             .await
             .map_err(|e| AppError::CommandFailed(e.to_string()))?;
         
-        let explicit_packages: std::collections::HashSet<String> = 
+        let explicit_packages: HashSet<String> = 
             String::from_utf8_lossy(&explicit_output.stdout)
                 .lines()
                 .map(|s| s.to_string())
@@ -133,40 +152,29 @@ impl PackageManager for ArchAdapter {
     }
     
     async fn uninstall_package(&self, name: &str) -> Result<PackageAction> {
-        let result = privileged::run_privileged(&["pacman", "-R", "--noconfirm", name])
-            .map_err(|e| AppError::CommandFailed(e))?;
+        let result = privileged::run_privileged("pacman", &["-R", "--noconfirm", name]).await;
         
         Ok(PackageAction {
             name: name.to_string(),
             action: "uninstall".to_string(),
-            success: result.success,
-            message: if result.success {
-                format!("Package {} removed", name)
-            } else {
-                result.stderr
-            },
+            success: result.is_ok(),
+            message: result.unwrap_or_else(|e| e.to_string()),
         })
     }
     
     async fn purge_package(&self, name: &str) -> Result<PackageAction> {
-        // -Rns removes package, dependencies, and config files
-        let result = privileged::run_privileged(&["pacman", "-Rns", "--noconfirm", name])
-            .map_err(|e| AppError::CommandFailed(e))?;
+        let result = privileged::run_privileged("pacman", &["-Rns", "--noconfirm", name]).await;
         
         Ok(PackageAction {
             name: name.to_string(),
             action: "purge".to_string(),
-            success: result.success,
-            message: if result.success {
-                format!("Package {} purged with dependencies", name)
-            } else {
-                result.stderr
-            },
+            success: result.is_ok(),
+            message: result.unwrap_or_else(|e| e.to_string()),
         })
     }
     
     async fn autoremove(&self) -> Result<PackageAction> {
-        // Get orphan packages
+        // Get orphan packages first
         let orphans = Command::new("pacman")
             .args(["-Qdtq"])
             .output()
@@ -184,44 +192,31 @@ impl PackageManager for ArchAdapter {
             });
         }
         
-        // Remove orphans
-        let packages: Vec<&str> = orphan_list.lines().collect();
-        let mut args = vec!["pacman", "-Rns", "--noconfirm"];
-        args.extend(packages.iter());
-        
-        let result = privileged::run_privileged(&args)
-            .map_err(|e| AppError::CommandFailed(e))?;
+        // Remove orphans via shell
+        let script = format!("pacman -Rns --noconfirm {}", orphan_list.replace('\n', " "));
+        let result = privileged::run_privileged_shell(&script).await;
         
         Ok(PackageAction {
             name: "autoremove".to_string(),
             action: "autoremove".to_string(),
-            success: result.success,
-            message: if result.success {
-                format!("Removed {} orphan packages", packages.len())
-            } else {
-                result.stderr
-            },
+            success: result.is_ok(),
+            message: result.unwrap_or_else(|e| e.to_string()),
         })
     }
     
     async fn clean_cache(&self) -> Result<CleanupResult> {
-        // Use paccache if available, otherwise pacman -Sc
         let result = if self.has_paccache().await {
-            privileged::run_privileged(&["paccache", "-r", "-k", "1"])
+            privileged::run_privileged("paccache", &["-r", "-k", "1"]).await
         } else {
-            privileged::run_privileged(&["pacman", "-Sc", "--noconfirm"])
-        }.map_err(|e| AppError::CommandFailed(e))?;
+            privileged::run_privileged("pacman", &["-Sc", "--noconfirm"]).await
+        };
         
         Ok(CleanupResult {
             category: "pacman_cache".to_string(),
             items_removed: 0,
             bytes_freed: 0,
-            success: result.success,
-            message: if result.success {
-                "Pacman cache cleaned".to_string()
-            } else {
-                result.stderr
-            },
+            success: result.is_ok(),
+            message: result.unwrap_or_else(|e| e.to_string()),
         })
     }
     
@@ -233,26 +228,5 @@ impl PackageManager for ArchAdapter {
         let size: u64 = packages.iter().map(|p| p.size_bytes).sum();
         
         Ok((total, auto, size))
-    }
-}
-
-impl ArchAdapter {
-    /// Parse size string like "12.5 MiB" to bytes
-    fn parse_size(size_str: &str) -> u64 {
-        let parts: Vec<&str> = size_str.split_whitespace().collect();
-        if parts.len() < 2 {
-            return 0;
-        }
-        
-        let num: f64 = parts[0].parse().unwrap_or(0.0);
-        let unit = parts[1].to_lowercase();
-        
-        match unit.as_str() {
-            "b" => num as u64,
-            "kib" | "kb" => (num * 1024.0) as u64,
-            "mib" | "mb" => (num * 1024.0 * 1024.0) as u64,
-            "gib" | "gb" => (num * 1024.0 * 1024.0 * 1024.0) as u64,
-            _ => 0,
-        }
     }
 }

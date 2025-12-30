@@ -77,7 +77,14 @@ impl Default for DistroInfo {
 
 impl DistroInfo {
     /// Parse /etc/os-release to get distribution info
+    /// Supports FORCE_DISTRO env var for simulation testing
     pub fn detect() -> Result<Self> {
+        // Check for FORCE_DISTRO environment variable (for mock testing)
+        if let Ok(forced) = std::env::var("FORCE_DISTRO") {
+            log::info!("[MOCK MODE] FORCE_DISTRO={} - Using simulated distro", forced);
+            return Ok(Self::mock_distro(&forced));
+        }
+        
         let content = fs::read_to_string("/etc/os-release")
             .map_err(|e| AppError::System(format!("Cannot read /etc/os-release: {}", e)))?;
 
@@ -118,6 +125,36 @@ impl DistroInfo {
             family,
             is_supported,
         })
+    }
+    
+    /// Create a mock DistroInfo for testing
+    fn mock_distro(distro: &str) -> Self {
+        let (id, name, family) = match distro.to_lowercase().as_str() {
+            "arch" | "manjaro" | "endeavouros" => {
+                ("arch".to_string(), "Arch Linux (Mock)".to_string(), DistroFamily::Arch)
+            }
+            "fedora" | "rhel" | "centos" => {
+                ("fedora".to_string(), "Fedora (Mock)".to_string(), DistroFamily::Fedora)
+            }
+            "suse" | "opensuse" | "tumbleweed" => {
+                ("opensuse".to_string(), "openSUSE (Mock)".to_string(), DistroFamily::Suse)
+            }
+            "debian" | "ubuntu" | "mint" => {
+                ("ubuntu".to_string(), "Ubuntu (Mock)".to_string(), DistroFamily::Debian)
+            }
+            _ => {
+                ("unknown".to_string(), "Unknown (Mock)".to_string(), DistroFamily::Unknown)
+            }
+        };
+        
+        Self {
+            id,
+            name,
+            version: "0.0".to_string(),
+            version_codename: "mock".to_string(),
+            family,
+            is_supported: family != DistroFamily::Unknown,
+        }
     }
     
     /// Detect distro family from ID and ID_LIKE fields

@@ -1,14 +1,32 @@
 //! APT Repository Manager module - Enhanced
 //! Manages sources.list and PPAs with region detection and apt-fast support
+//! NOTE: This module is only available on Debian/Ubuntu based systems
 
 use crate::error::{AppError, Result};
+use crate::state::AppState;
+use crate::utils::distro::DistroFamily;
 use crate::utils::privileged;
 use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 use std::time::Instant;
+use tauri::State;
 use tokio::time::{timeout, Duration};
+
+// ============================================================================
+// Feature Availability Check
+// ============================================================================
+
+/// Check if this module is available (APT-based distros only)
+fn is_apt_based(family: &DistroFamily) -> bool {
+    matches!(family, DistroFamily::Debian)
+}
+
+/// Check if we're in mock mode
+fn is_mock_mode() -> bool {
+    std::env::var("FORCE_DISTRO").is_ok()
+}
 
 // ============================================================================
 // Data Structures
@@ -239,6 +257,121 @@ const AVAILABLE_REGIONS: &[(&str, &str)] = &[
 ];
 
 // ============================================================================
+// Arch Linux Mirrors (50+)
+// ============================================================================
+
+const ARCH_MIRRORS: &[(&str, &str, &str, &str)] = &[
+    // North America
+    ("Kernel.org", "https://mirrors.kernel.org/archlinux", "United States", "US"),
+    ("MIT", "https://mirrors.mit.edu/archlinux", "United States", "US"),
+    ("RIT", "https://mirrors.rit.edu/archlinux", "United States", "US"),
+    ("Rackspace", "https://mirror.rackspace.com/archlinux", "United States", "US"),
+    ("Liquidweb", "https://mirror.liquidweb.com/archlinux", "United States", "US"),
+    ("Canada", "https://mirror.csclub.uwaterloo.ca/archlinux", "Canada", "CA"),
+    
+    // Europe
+    ("Germany Hetzner", "https://mirror.hetzner.de/archlinux/archlinux", "Germany", "DE"),
+    ("Germany FAU", "https://ftp.fau.de/archlinux", "Germany", "DE"),
+    ("Netherlands", "https://mirror.nl.leaseweb.net/archlinux", "Netherlands", "NL"),
+    ("UK", "https://mirror.bytemark.co.uk/archlinux", "United Kingdom", "GB"),
+    ("France", "https://archlinux.mirrors.ovh.net/archlinux", "France", "FR"),
+    ("Poland", "https://mirror.onet.pl/pub/mirrors/archlinux", "Poland", "PL"),
+    ("Italy", "https://archlinux.mirror.garr.it/archlinux", "Italy", "IT"),
+    ("Sweden", "https://ftp.lysator.liu.se/pub/archlinux", "Sweden", "SE"),
+    ("Finland", "https://mirror.pseudoform.org/archlinux", "Finland", "FI"),
+    ("Switzerland", "https://mirror.puzzle.ch/archlinux", "Switzerland", "CH"),
+    ("Austria", "https://mirror.easyname.at/archlinux", "Austria", "AT"),
+    ("Czech Republic", "https://mirror.nic.cz/archlinux", "Czech Republic", "CZ"),
+    ("Russia", "https://mirror.yandex.ru/archlinux", "Russia", "RU"),
+    
+    // Asia Pacific
+    ("Indonesia", "https://mirror.poliwangi.ac.id/archlinux", "Indonesia", "ID"),
+    ("Indonesia Biznet", "https://mirror.biznetgio.com/archlinux", "Indonesia", "ID"),
+    ("Singapore", "https://mirror.0x.sg/archlinux", "Singapore", "SG"),
+    ("Japan JAIST", "https://ftp.jaist.ac.jp/pub/Linux/ArchLinux", "Japan", "JP"),
+    ("Australia", "https://mirror.aarnet.edu.au/pub/archlinux", "Australia", "AU"),
+    ("Taiwan", "https://archlinux.cs.nctu.edu.tw", "Taiwan", "TW"),
+    ("Hong Kong", "https://mirror-hk.koddos.net/archlinux", "Hong Kong", "HK"),
+    ("China USTC", "https://mirrors.ustc.edu.cn/archlinux", "China", "CN"),
+    ("China Tsinghua", "https://mirrors.tuna.tsinghua.edu.cn/archlinux", "China", "CN"),
+    ("India", "https://mirror.sahil.world/archlinux", "India", "IN"),
+    ("South Korea", "https://mirror.premi.st/archlinux", "South Korea", "KR"),
+    
+    // South America
+    ("Brazil", "https://mirror.ufscar.br/archlinux", "Brazil", "BR"),
+    ("Chile", "https://mirror.uchile.cl/archlinux", "Chile", "CL"),
+];
+
+// ============================================================================
+// Fedora Mirrors (30+)
+// ============================================================================
+
+const FEDORA_MIRRORS: &[(&str, &str, &str, &str)] = &[
+    // North America
+    ("Kernel.org", "https://mirrors.kernel.org/fedora", "United States", "US"),
+    ("MIT", "https://mirrors.mit.edu/fedora", "United States", "US"),
+    ("RIT", "https://mirrors.rit.edu/fedora", "United States", "US"),
+    ("Princeton", "https://mirror.math.princeton.edu/pub/fedora", "United States", "US"),
+    ("Canada", "https://mirror.csclub.uwaterloo.ca/fedora", "Canada", "CA"),
+    
+    // Europe
+    ("Germany", "https://ftp.halifax.rwth-aachen.de/fedora", "Germany", "DE"),
+    ("Netherlands", "https://mirror.nl.leaseweb.net/fedora", "Netherlands", "NL"),
+    ("UK", "https://www.mirrorservice.org/sites/dl.fedoraproject.org/pub/fedora", "United Kingdom", "GB"),
+    ("France", "https://mirrors.ircam.fr/pub/fedora", "France", "FR"),
+    ("Poland", "https://ftp.icm.edu.pl/pub/Linux/dist/fedora", "Poland", "PL"),
+    ("Italy", "https://fedora.mirror.garr.it/fedora", "Italy", "IT"),
+    ("Sweden", "https://ftp.lysator.liu.se/pub/fedora", "Sweden", "SE"),
+    ("Russia", "https://mirror.yandex.ru/fedora", "Russia", "RU"),
+    
+    // Asia Pacific
+    ("Indonesia", "https://mirror.poliwangi.ac.id/fedora", "Indonesia", "ID"),
+    ("Japan JAIST", "https://ftp.jaist.ac.jp/pub/Linux/Fedora", "Japan", "JP"),
+    ("Australia", "https://mirror.aarnet.edu.au/pub/fedora", "Australia", "AU"),
+    ("China USTC", "https://mirrors.ustc.edu.cn/fedora", "China", "CN"),
+    ("China Tsinghua", "https://mirrors.tuna.tsinghua.edu.cn/fedora", "China", "CN"),
+    ("South Korea", "https://ftp.kaist.ac.kr/fedora", "South Korea", "KR"),
+    ("Taiwan", "https://ftp.twaren.net/Linux/Fedora", "Taiwan", "TW"),
+    
+    // South America
+    ("Brazil", "https://mirror.ufscar.br/fedora", "Brazil", "BR"),
+];
+
+// ============================================================================
+// openSUSE Mirrors (30+)
+// ============================================================================
+
+const OPENSUSE_MIRRORS: &[(&str, &str, &str, &str)] = &[
+    // North America
+    ("Kernel.org", "https://mirrors.kernel.org/opensuse", "United States", "US"),
+    ("MIT", "https://mirrors.mit.edu/opensuse", "United States", "US"),
+    ("RIT", "https://mirrors.rit.edu/opensuse", "United States", "US"),
+    ("Canada", "https://mirror.csclub.uwaterloo.ca/opensuse", "Canada", "CA"),
+    
+    // Europe
+    ("Germany", "https://ftp.halifax.rwth-aachen.de/opensuse", "Germany", "DE"),
+    ("Germany FAU", "https://ftp.fau.de/opensuse", "Germany", "DE"),
+    ("Netherlands", "https://mirror.nl.leaseweb.net/opensuse", "Netherlands", "NL"),
+    ("UK", "https://www.mirrorservice.org/sites/download.opensuse.org", "United Kingdom", "GB"),
+    ("France", "https://fr.mirrors.cicku.me/opensuse", "France", "FR"),
+    ("Poland", "https://ftp.icm.edu.pl/pub/Linux/dist/opensuse", "Poland", "PL"),
+    ("Italy", "https://opensuse.mirror.garr.it/opensuse", "Italy", "IT"),
+    ("Sweden", "https://ftp.lysator.liu.se/pub/opensuse", "Sweden", "SE"),
+    ("Russia", "https://mirror.yandex.ru/opensuse", "Russia", "RU"),
+    
+    // Asia Pacific
+    ("Indonesia", "https://mirror.poliwangi.ac.id/opensuse", "Indonesia", "ID"),
+    ("Japan JAIST", "https://ftp.jaist.ac.jp/pub/Linux/openSUSE", "Japan", "JP"),
+    ("Australia", "https://mirror.aarnet.edu.au/pub/opensuse", "Australia", "AU"),
+    ("China USTC", "https://mirrors.ustc.edu.cn/opensuse", "China", "CN"),
+    ("China Tsinghua", "https://mirrors.tuna.tsinghua.edu.cn/opensuse", "China", "CN"),
+    ("Taiwan", "https://ftp.twaren.net/Linux/OpenSuSE", "Taiwan", "TW"),
+    
+    // South America
+    ("Brazil", "https://opensuse.c3sl.ufpr.br", "Brazil", "BR"),
+];
+
+// ============================================================================
 // Helper Functions
 // ============================================================================
 
@@ -349,9 +482,23 @@ fn detect_region() -> (String, String) {
 // Tauri Commands (All async)
 // ============================================================================
 
+/// Check if repositories feature is available on this distro
+#[tauri::command]
+pub fn is_repositories_available(state: State<'_, AppState>) -> bool {
+    is_apt_based(&state.context.family)
+}
+
 /// Get all APT repositories
 #[tauri::command]
-pub async fn get_repositories() -> Result<Vec<Repository>> {
+pub async fn get_repositories(state: State<'_, AppState>) -> Result<Vec<Repository>> {
+    // Check if feature is available
+    if !is_apt_based(&state.context.family) {
+        if is_mock_mode() {
+            log::info!("[MOCK] Returning empty repositories for non-APT distro");
+        }
+        return Ok(Vec::new());
+    }
+    
     let repos = tokio::task::spawn_blocking(|| {
         let mut all_repos = Vec::new();
         
@@ -373,7 +520,7 @@ pub async fn get_repositories() -> Result<Vec<Repository>> {
         }
         
         all_repos
-    }).await.unwrap();
+    }).await.map_err(|e| AppError::System(format!("Task failed: {}", e)))?;
     
     Ok(repos)
 }
@@ -475,16 +622,24 @@ pub fn get_region_info() -> RegionInfo {
 }
 
 /// Get mirrors for a specific region (or all if no region specified)
+/// Now supports multi-distro: Debian/Ubuntu, Arch, Fedora, openSUSE
 #[tauri::command]
-pub fn get_mirrors(region: Option<String>) -> Vec<MirrorInfo> {
-    let os_release = fs::read_to_string("/etc/os-release").unwrap_or_default();
-    let is_ubuntu = os_release.contains("ubuntu") || os_release.contains("Ubuntu");
+pub fn get_mirrors(region: Option<String>, state: State<'_, AppState>) -> Vec<MirrorInfo> {
+    get_mirrors_for_family(region, &state.context.family)
+}
+
+/// Internal helper function to get mirrors for a specific distro family
+fn get_mirrors_for_family(region: Option<String>, family: &DistroFamily) -> Vec<MirrorInfo> {
+    // Select mirror list based on distro family
+    let mirrors: &[(&str, &str, &str, &str)] = match family {
+        DistroFamily::Debian => UBUNTU_MIRRORS,
+        DistroFamily::Arch => ARCH_MIRRORS,
+        DistroFamily::Fedora => FEDORA_MIRRORS,
+        DistroFamily::Suse => OPENSUSE_MIRRORS,
+        DistroFamily::Unknown => UBUNTU_MIRRORS, // Fallback to Ubuntu
+    };
     
-    if !is_ubuntu {
-        return vec![]; // For now only Ubuntu mirrors
-    }
-    
-    UBUNTU_MIRRORS
+    mirrors
         .iter()
         .filter(|(_, _, _, code)| {
             region.as_ref().map_or(true, |r| *code == r.as_str() || r == "ALL")
@@ -523,11 +678,17 @@ pub async fn test_mirror_speed(uri: String) -> Result<u64> {
 
 /// Test mirrors for a region in parallel
 #[tauri::command]
-pub async fn test_all_mirrors(region: Option<String>) -> Vec<MirrorInfo> {
-    let mut mirrors = get_mirrors(region);
+pub async fn test_all_mirrors(region: Option<String>, state: State<'_, AppState>) -> Result<Vec<MirrorInfo>> {
+    // Extract family before async block to avoid lifetime issues
+    let family = state.context.family;
     
-    let test_futures: Vec<_> = mirrors.iter().map(|m| {
-        let uri = m.uri.clone();
+    // Get mirrors using extracted family
+    let mut mirrors: Vec<MirrorInfo> = get_mirrors_for_family(region, &family);
+    
+    // Collect URIs for parallel testing
+    let uris: Vec<String> = mirrors.iter().map(|m| m.uri.clone()).collect();
+    
+    let test_futures: Vec<_> = uris.into_iter().map(|uri| {
         async move {
             test_mirror_speed(uri).await.ok()
         }
@@ -548,7 +709,7 @@ pub async fn test_all_mirrors(region: Option<String>) -> Vec<MirrorInfo> {
         }
     });
     
-    mirrors
+    Ok(mirrors)
 }
 
 /// Set the fastest mirror as primary

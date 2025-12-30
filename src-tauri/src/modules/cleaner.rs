@@ -1,12 +1,14 @@
 //! System cleaner module - Enhanced
 //! Handles cleanup of cache, logs, trash, etc. (async)
-//! Uses hardcoded safe paths - NO arbitrary path deletion
+//! Uses distro-agnostic paths via DistroContext
 
 use crate::error::{AppError, Result};
+use crate::state::AppState;
 use crate::utils::privileged;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
+use tauri::State;
 
 // ============================================================================
 // Data Structures
@@ -120,8 +122,11 @@ fn get_dirs_size(paths: &[String]) -> (u64, u32) {
 
 /// Get all cleanup categories with their current sizes (async)
 #[tauri::command]
-pub async fn get_cleanup_categories() -> Result<Vec<CleanupCategory>> {
-    let categories = tokio::task::spawn_blocking(|| {
+pub async fn get_cleanup_categories(state: State<'_, AppState>) -> Result<Vec<CleanupCategory>> {
+    let pkg_cache_path = state.context.paths.package_cache.clone();
+    let pm_name = state.context.package_manager.name().to_string();
+    
+    let categories = tokio::task::spawn_blocking(move || {
         let home = home_dir();
         let mut categories = Vec::new();
 
@@ -308,17 +313,16 @@ pub async fn get_cleanup_categories() -> Result<Vec<CleanupCategory>> {
             });
         }
 
-        // 12. APT Cache (requires root)
-        let apt_path = Path::new("/var/cache/apt/archives");
-        let (apt_size, apt_count) = get_dir_size(apt_path);
+        // 12. Package Cache (distro-agnostic)
+        let (pkg_size, pkg_count) = get_dir_size(Path::new(&pkg_cache_path));
         categories.push(CleanupCategory {
-            id: "apt_cache".to_string(),
-            name: "APT Package Cache".to_string(),
+            id: "pkg_cache".to_string(),
+            name: format!("{} Package Cache", pm_name.to_uppercase()),
             icon: "📥".to_string(),
-            size_bytes: apt_size,
-            file_count: apt_count,
+            size_bytes: pkg_size,
+            file_count: pkg_count,
             requires_root: true,
-            description: "Downloaded .deb package files. Safe to remove - packages will be re-downloaded if needed.".to_string(),
+            description: "Downloaded package files. Safe to remove - packages will be re-downloaded if needed.".to_string(),
         });
 
         // 13. Snap Cache (requires root)
@@ -425,9 +429,29 @@ fn get_old_logs_size_sync() -> u64 {
 // Cleanup Actions (All async)
 // ============================================================================
 
+/// Preview cleanup (dry run) - shows what would be deleted without actually deleting
+/// Returns the cleanup result with calculated size but no actual deletion
+#[tauri::command]
+pub async fn preview_cleanup(category_id: String, state: State<'_, AppState>) -> Result<CleanupResult> {
+    // Just get the category info - this is already a "dry run" calculation
+    let categories = get_cleanup_categories(state).await?;
+    
+    if let Some(cat) = categories.iter().find(|c| c.id == category_id) {
+        Ok(CleanupResult {
+            category: category_id,
+            success: true,
+            bytes_freed: cat.size_bytes,
+            files_removed: cat.file_count,
+            message: format!("Preview: Would free {} bytes from {} files", cat.size_bytes, cat.file_count),
+        })
+    } else {
+        Err(AppError::System(format!("Unknown category: {}", category_id)))
+    }
+}
+
 /// Clean a specific category (async with timeout for root ops)
 #[tauri::command]
-pub async fn clean_category(category_id: String) -> Result<CleanupResult> {
+pub async fn clean_category(category_id: String, state: State<'_, AppState>) -> Result<CleanupResult> {
     let home = home_dir();
 
     match category_id.as_str() {
@@ -635,30 +659,16 @@ pub async fn clean_category(category_id: String) -> Result<CleanupResult> {
             })
         }
 
-        "apt_cache" => {
-            let result = privileged::run_privileged("apt-get", &["clean"]).await;
-
+        "pkg_cache" | "apt_cache" => {
+            let result = state.context.package_manager.clean_cache().await;
+            
             match result {
-                Ok(_) => Ok(CleanupResult {
-                    category: "apt_cache".to_string(),
-                    success: true,
-                    bytes_freed: 0,
-                    files_removed: 0,
-                    message: "APT cache cleaned".to_string(),
-                }),
-                Err(AppError::UserCancelled) => Ok(CleanupResult {
-                    category: "apt_cache".to_string(),
-                    success: false,
-                    bytes_freed: 0,
-                    files_removed: 0,
-                    message: "Operation cancelled by user".to_string(),
-                }),
-                Err(AppError::Timeout(msg)) => Ok(CleanupResult {
-                    category: "apt_cache".to_string(),
-                    success: false,
-                    bytes_freed: 0,
-                    files_removed: 0,
-                    message: msg,
+                Ok(cleanup) => Ok(CleanupResult {
+                    category: "pkg_cache".to_string(),
+                    success: cleanup.success,
+                    bytes_freed: cleanup.bytes_freed,
+                    files_removed: cleanup.items_removed,
+                    message: cleanup.message,
                 }),
                 Err(e) => Err(e),
             }
@@ -755,29 +765,15 @@ pub async fn clean_category(category_id: String) -> Result<CleanupResult> {
         }
 
         "old_kernels" => {
-            let result = privileged::run_privileged("apt-get", &["autoremove", "-y"]).await;
-
+            let result = state.context.package_manager.autoremove().await;
+            
             match result {
-                Ok(_) => Ok(CleanupResult {
+                Ok(action) => Ok(CleanupResult {
                     category: "old_kernels".to_string(),
-                    success: true,
+                    success: action.success,
                     bytes_freed: 0,
                     files_removed: 0,
-                    message: "Old packages removed".to_string(),
-                }),
-                Err(AppError::UserCancelled) => Ok(CleanupResult {
-                    category: "old_kernels".to_string(),
-                    success: false,
-                    bytes_freed: 0,
-                    files_removed: 0,
-                    message: "Operation cancelled by user".to_string(),
-                }),
-                Err(AppError::Timeout(msg)) => Ok(CleanupResult {
-                    category: "old_kernels".to_string(),
-                    success: false,
-                    bytes_freed: 0,
-                    files_removed: 0,
-                    message: msg,
+                    message: action.message,
                 }),
                 Err(e) => Err(e),
             }
@@ -792,8 +788,8 @@ pub async fn clean_category(category_id: String) -> Result<CleanupResult> {
 
 /// Get total reclaimable space (async)
 #[tauri::command]
-pub async fn get_total_reclaimable() -> Result<u64> {
-    let categories = get_cleanup_categories().await?;
+pub async fn get_total_reclaimable(state: State<'_, AppState>) -> Result<u64> {
+    let categories = get_cleanup_categories(state).await?;
     Ok(categories.iter().map(|c| c.size_bytes).sum())
 }
 
@@ -1005,7 +1001,7 @@ pub async fn get_autoclean_status() -> Result<String> {
 
 /// Run auto-clean now (manual trigger)
 #[tauri::command]
-pub async fn run_autoclean_now() -> Result<String> {
+pub async fn run_autoclean_now(state: State<'_, AppState>) -> Result<String> {
     let config = get_autoclean_schedule().await?;
     
     if config.categories.is_empty() {
@@ -1014,7 +1010,7 @@ pub async fn run_autoclean_now() -> Result<String> {
     
     let mut cleaned = Vec::new();
     for cat in &config.categories {
-        if let Ok(result) = clean_category(cat.clone()).await {
+        if let Ok(result) = clean_category(cat.clone(), state.clone()).await {
             if result.success {
                 cleaned.push(cat.clone());
             }

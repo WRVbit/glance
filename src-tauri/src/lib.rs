@@ -1,6 +1,8 @@
 //! Linux Optimizer - Main library
 //! A modern Linux system optimizer inspired by Stacer
+//! Supports: Debian/Ubuntu, Arch, Fedora, OpenSUSE
 
+pub mod adapters;
 mod error;
 mod modules;
 mod state;
@@ -9,11 +11,25 @@ mod utils;
 use modules::{cleaner, dns, hosts, packages, processes, repositories, resources, services, startup, system_stats, tweaks};
 use state::AppState;
 use utils::distro::DistroInfo;
+use utils::{DistroFamily, DesktopEnvironment};
+use tauri::State;
 
 /// Get distribution information
 #[tauri::command]
 fn get_distro_info() -> Result<DistroInfo, error::AppError> {
     DistroInfo::detect()
+}
+
+/// Get distro family name for UI display
+#[tauri::command]
+fn get_distro_family(state: State<'_, AppState>) -> String {
+    state.context.family.display_name().to_string()
+}
+
+/// Get package manager name for UI display
+#[tauri::command]
+fn get_pm_name(state: State<'_, AppState>) -> String {
+    state.context.package_manager.name().to_string()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -33,6 +49,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // Distro
             get_distro_info,
+            get_distro_family,
+            get_pm_name,
+            packages::get_package_manager_name,
             // System Stats
             system_stats::get_system_info,
             system_stats::get_cpu_stats,
@@ -41,6 +60,7 @@ pub fn run() {
             system_stats::get_network_stats,
             // Cleaner
             cleaner::get_cleanup_categories,
+            cleaner::preview_cleanup,
             cleaner::clean_category,
             cleaner::get_total_reclaimable,
             cleaner::get_autoclean_schedule,
@@ -82,6 +102,7 @@ pub fn run() {
             processes::get_process_count,
             processes::bulk_terminate_apps,
             // Repositories (Enhanced)
+            repositories::is_repositories_available,
             repositories::get_repositories,
             repositories::toggle_repository,
             repositories::delete_repository,
