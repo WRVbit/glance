@@ -1,5 +1,5 @@
 //! Systemd services module
-//! Lists and manages system services (async)
+//! Lists and manages system services with categorization (async)
 
 use crate::error::{AppError, Result};
 use crate::utils::privileged;
@@ -20,6 +20,8 @@ pub struct ServiceInfo {
     pub is_enabled: bool,
     pub can_stop: bool,
     pub can_restart: bool,
+    pub category: String,
+    pub memory_mb: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,6 +30,81 @@ pub struct ServiceAction {
     pub action: String,
     pub success: bool,
     pub message: String,
+}
+
+// Category detection patterns
+const SYSTEM_SERVICES: &[&str] = &[
+    "systemd", "dbus", "polkit", "udev", "cron", "rsyslog", "syslog",
+    "journal", "login", "resolved", "timesyncd", "fstrim", "snapd",
+    "apparmor", "fail2ban", "irqbalance", "thermald", "init", "boot"
+];
+
+const NETWORK_SERVICES: &[&str] = &[
+    "network", "NetworkManager", "wpa_supplicant", "dhcp", "avahi",
+    "ssh", "openvpn", "wireguard", "ufw", "firewalld", "iptables",
+    "bluetooth", "modem", "netfilter", "dns", "ntp"
+];
+
+const AUDIO_SERVICES: &[&str] = &[
+    "pulse", "pipewire", "alsa", "jack", "sound", "audio",
+    "wireplumber", "ofono"
+];
+
+const DESKTOP_SERVICES: &[&str] = &[
+    "gdm", "sddm", "lightdm", "gnome", "kde", "plasma", "display",
+    "xorg", "wayland", "colord", "accounts", "gvfs", "tracker",
+    "evolution", "geoclue", "power", "upower", "screen"
+];
+
+const DATABASE_SERVICES: &[&str] = &[
+    "mysql", "mariadb", "postgres", "mongodb", "redis", "sqlite",
+    "memcached", "elasticsearch", "cassandra"
+];
+
+const WEB_SERVICES: &[&str] = &[
+    "apache", "nginx", "httpd", "caddy", "php-fpm", "tomcat",
+    "docker", "containerd", "podman", "kubelet"
+];
+
+const HARDWARE_SERVICES: &[&str] = &[
+    "acpi", "battery", "lid", "suspend", "hibernate", "laptop",
+    "nvidia", "amd", "intel", "gpu", "graphics", "touchpad",
+    "keyboard", "mouse", "usb", "pci", "bolt"
+];
+
+const PRINT_SERVICES: &[&str] = &[
+    "cups", "print", "scanner", "sane"
+];
+
+/// Detect service category from name and description
+fn detect_category(name: &str, description: &str) -> String {
+    let check = |patterns: &[&str]| {
+        patterns.iter().any(|p| {
+            name.to_lowercase().contains(*p) || description.to_lowercase().contains(*p)
+        })
+    };
+    
+    if check(SYSTEM_SERVICES) {
+        "System".to_string()
+    } else if check(NETWORK_SERVICES) {
+        "Network".to_string()
+    } else if check(AUDIO_SERVICES) {
+        "Audio".to_string()
+    } else if check(DESKTOP_SERVICES) {
+        "Desktop".to_string()
+    } else if check(DATABASE_SERVICES) {
+        "Database".to_string()
+    } else if check(WEB_SERVICES) {
+        "Web/Container".to_string()
+    } else if check(HARDWARE_SERVICES) {
+        "Hardware".to_string()
+    } else if check(PRINT_SERVICES) {
+        "Printing".to_string()
+    } else if name.contains("@") || name.starts_with("user") {
+        "User Apps".to_string()
+    } else {
+        "Other".to_string()
+    }
 }
 
 // ============================================================================
@@ -74,16 +151,21 @@ pub async fn get_services() -> Result<Vec<ServiceInfo>> {
 
         // Check if enabled (async)
         let is_enabled = check_enabled_async(&name).await;
+        
+        // Detect category
+        let category = detect_category(&name, &description);
 
         services.push(ServiceInfo {
             name: name.clone(),
-            description,
+            description: description.clone(),
             load_state,
             active_state: active_state.clone(),
             sub_state,
             is_enabled,
             can_stop: active_state == "active",
             can_restart: active_state == "active",
+            category,
+            memory_mb: None, // Could be enhanced to query systemctl show MemoryCurrent
         });
     }
 

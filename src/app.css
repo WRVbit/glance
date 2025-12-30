@@ -83,6 +83,22 @@
     @apply w-full px-4 py-2 rounded-lg bg-surface-800 border border-white/10 text-white placeholder-gray-500 focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500 transition-colors;
   }
 
+  /* Select dropdown dark theme */
+  select {
+    @apply bg-surface-800 text-white;
+    color-scheme: dark;
+  }
+
+  select option {
+    background-color: #1e1e2e;
+    color: #ffffff;
+    padding: 8px;
+  }
+
+  select:focus {
+    @apply outline-none border-primary-500;
+  }
+
   /* Badge styles */
   .badge {
     @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;

@@ -1,19 +1,19 @@
 //! Shared application state
 //! Thread-safe cache for system information
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use sysinfo::System;
 
 /// Shared system state with cached data
 pub struct AppState {
-    /// Cached sysinfo System instance
-    pub sys: Mutex<System>,
+    /// Cached sysinfo System instance wrapped in Arc for thread-safe cloning
+    pub sys: Arc<Mutex<System>>,
 }
 
 impl AppState {
     pub fn new() -> Self {
         Self {
-            sys: Mutex::new(System::new()),
+            sys: Arc::new(Mutex::new(System::new_all())),
         }
     }
 }

@@ -23,6 +23,13 @@ export interface CleanupResult {
     message: string;
 }
 
+export interface ScheduleConfig {
+    enabled: boolean;
+    interval: string; // "daily", "weekly", "monthly"
+    categories: string[];
+    last_run: string | null;
+}
+
 // ============================================================================
 // API Functions
 // ============================================================================
@@ -37,4 +44,21 @@ export async function cleanCategory(categoryId: string): Promise<CleanupResult> 
 
 export async function getTotalReclaimable(): Promise<number> {
     return invoke('get_total_reclaimable');
+}
+
+// Auto-clean schedule functions
+export async function getAutocleanSchedule(): Promise<ScheduleConfig> {
+    return invoke('get_autoclean_schedule');
+}
+
+export async function setAutocleanSchedule(config: ScheduleConfig): Promise<string> {
+    return invoke('set_autoclean_schedule', { config });
+}
+
+export async function getAutocleanStatus(): Promise<string> {
+    return invoke('get_autoclean_status');
+}
+
+export async function runAutocleanNow(): Promise<string> {
+    return invoke('run_autoclean_now');
 }

@@ -1,6 +1,7 @@
 //! Domain modules
 
 pub mod cleaner;
+pub mod dns;
 pub mod hosts;
 pub mod packages;
 pub mod processes;

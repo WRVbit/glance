@@ -11,6 +11,7 @@ export interface PackageInfo {
     size_bytes: number;
     description: string;
     is_auto: boolean;
+    category: string;
 }
 
 export interface PackageAction {

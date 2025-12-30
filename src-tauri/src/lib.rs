@@ -6,7 +6,7 @@ mod modules;
 mod state;
 mod utils;
 
-use modules::{cleaner, hosts, packages, processes, repositories, resources, services, startup, system_stats, tweaks};
+use modules::{cleaner, dns, hosts, packages, processes, repositories, resources, services, startup, system_stats, tweaks};
 use state::AppState;
 use utils::distro::DistroInfo;
 
@@ -43,10 +43,15 @@ pub fn run() {
             cleaner::get_cleanup_categories,
             cleaner::clean_category,
             cleaner::get_total_reclaimable,
+            cleaner::get_autoclean_schedule,
+            cleaner::set_autoclean_schedule,
+            cleaner::get_autoclean_status,
+            cleaner::run_autoclean_now,
             // Tweaks
             tweaks::get_tweaks,
             tweaks::apply_tweak,
             tweaks::apply_all_recommended,
+            tweaks::get_device_info,
             // Services
             services::get_services,
             services::start_service,
@@ -75,33 +80,45 @@ pub fn run() {
             processes::kill_process,
             processes::force_kill_process,
             processes::get_process_count,
-            // Repositories (NEW)
+            processes::bulk_terminate_apps,
+            // Repositories (Enhanced)
             repositories::get_repositories,
             repositories::toggle_repository,
+            repositories::delete_repository,
             repositories::add_ppa,
             repositories::remove_ppa,
+            repositories::get_region_info,
             repositories::get_mirrors,
             repositories::test_mirror_speed,
             repositories::test_all_mirrors,
             repositories::set_mirror,
             repositories::apt_update,
-            // Resources (NEW)
+            // apt-fast
+            repositories::check_apt_fast,
+            repositories::install_apt_fast,
+            repositories::configure_apt_fast,
+            // Resources (Enhanced)
             resources::get_resource_snapshot,
             resources::get_resource_history,
             resources::add_resource_snapshot,
             resources::clear_resource_history,
             resources::get_per_core_usage,
-            // Hosts (NEW)
-            hosts::get_hosts,
-            hosts::get_hosts_stats,
-            hosts::add_host,
-            hosts::remove_host,
-            hosts::toggle_host,
-            hosts::get_blocklists,
-            hosts::import_blocklist,
+            resources::get_gpu_info,
+            resources::get_disk_io_stats,
+            // Ad-Block Manager (formerly Hosts)
+            hosts::get_blocklist_sources,
+            hosts::get_adblock_stats,
+            hosts::apply_blocklists,
+            hosts::clear_blocklists,
             hosts::backup_hosts,
             hosts::list_hosts_backups,
             hosts::restore_hosts,
+            // DNS Manager
+            dns::get_dns_providers,
+            dns::get_current_dns,
+            dns::set_dns_provider,
+            dns::set_custom_dns,
+            dns::reset_dns,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

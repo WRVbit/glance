@@ -105,22 +105,3 @@ pub async fn run_privileged_shell(script: &str) -> Result<String> {
         Err(AppError::CommandFailed(stderr.to_string()))
     }
 }
-
-/// Run a non-privileged async command
-pub async fn run_async_command(cmd: &str, args: &[&str]) -> Result<String> {
-    let output = Command::new(cmd)
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .await
-        .map_err(|e| AppError::CommandFailed(format!("Failed to execute {}: {}", cmd, e)))?;
-
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    } else {
-        Err(AppError::CommandFailed(
-            String::from_utf8_lossy(&output.stderr).to_string(),
-        ))
-    }
-}

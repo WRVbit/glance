@@ -79,13 +79,7 @@ impl DistroInfo {
         }
     }
 
-    /// Check if this distro uses APT package manager
-    pub fn uses_apt(&self) -> bool {
-        matches!(
-            self.id.as_str(),
-            "ubuntu" | "debian" | "linuxmint" | "pop" | "elementary" | "zorin"
-        )
-    }
+
 }
 
 #[cfg(test)]

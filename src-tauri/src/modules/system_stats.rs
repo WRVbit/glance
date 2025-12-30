@@ -97,11 +97,13 @@ pub async fn get_system_info() -> Result<SystemInfo> {
 /// For accurate readings, frontend should poll every 1-2 seconds
 #[tauri::command]
 pub async fn get_cpu_stats(state: State<'_, AppState>) -> Result<CpuStats> {
+    // Clone Arc to pass to blocking thread
+    let sys = state.sys.clone();
+    
     let stats = tokio::task::spawn_blocking(move || {
-        let mut sys = state.sys.lock().unwrap();
+        let mut sys = sys.lock().unwrap();
 
         // Refresh only CPU usage - no sleep needed
-        // Accuracy increases with poll frequency from frontend
         sys.refresh_cpu_specifics(CpuRefreshKind::nothing().with_cpu_usage());
 
         let per_core: Vec<f32> = sys.cpus().iter().map(|cpu| cpu.cpu_usage()).collect();
@@ -125,8 +127,11 @@ pub async fn get_cpu_stats(state: State<'_, AppState>) -> Result<CpuStats> {
 /// Get memory statistics
 #[tauri::command]
 pub async fn get_memory_stats(state: State<'_, AppState>) -> Result<MemoryStats> {
+    // Clone Arc to pass to blocking thread
+    let sys = state.sys.clone();
+    
     let stats = tokio::task::spawn_blocking(move || {
-        let mut sys = state.sys.lock().unwrap();
+        let mut sys = sys.lock().unwrap();
 
         // Selective refresh - only memory
         sys.refresh_memory_specifics(MemoryRefreshKind::everything());

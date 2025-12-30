@@ -8,6 +8,7 @@
   import * as reposService from "./lib/services/repositories";
   import * as resourcesService from "./lib/services/resources";
   import * as hostsService from "./lib/services/hosts";
+  import * as dnsService from "./lib/services/dns";
   import { invoke } from "@tauri-apps/api/core";
 
   // ============================================================================
@@ -29,6 +30,14 @@
   let cleanupCategories = $state([]);
   let totalReclaimable = $state(0);
   let cleaningCategory = $state(null);
+  let autocleanConfig = $state({
+    enabled: false,
+    interval: "weekly",
+    categories: ["trash", "thumbnails", "browser_cache"],
+    last_run: null,
+  });
+  let autocleanStatus = $state("Not configured");
+  let savingAutoclean = $state(false);
 
   // Tweaks
   let tweakCategories = $state([]);
@@ -38,17 +47,20 @@
   let services = $state([]);
   let servicesFilter = $state("");
   let loadingServices = $state(false);
+  let selectedServiceCategory = $state("ALL");
 
   // Packages
   let packages = $state([]);
   let packagesFilter = $state("");
   let packageStats = $state([0, 0, 0]);
   let loadingPackages = $state(false);
+  let selectedPackageCategory = $state("ALL");
 
   // Processes
   let processes = $state([]);
   let processesFilter = $state("");
   let loadingProcesses = $state(false);
+  let selectedProcessCategory = $state("ALL");
 
   // Startup
   let startupApps = $state([]);
@@ -60,26 +72,53 @@
   let loadingRepos = $state(false);
   let testingMirrors = $state(false);
   let newPpa = $state("");
+  let selectedRegion = $state("ALL");
+  let regionInfo = $state({
+    detected_country: "",
+    detected_code: "",
+    available_regions: [],
+  });
+  let aptFastStatus = $state({
+    installed: false,
+    aria2_installed: false,
+    max_connections: 5,
+  });
+  let installingAptFast = $state(false);
+  let deletingRepo = $state(null);
 
-  // Resources (history for graphs)
+  // Resources (enhanced with GPU, Disk I/O)
   let resourceHistory = $state({
     snapshots: [],
     net_rx_speed: [],
     net_tx_speed: [],
+    disk_read_speed: [],
+    disk_write_speed: [],
+    ram_history: [],
   });
+  let gpuInfo = $state(null);
   let resourceInterval = $state(null);
 
-  // Hosts
-  let hostEntries = $state([]);
-  let hostsStats = $state({
-    total_entries: 0,
-    enabled_entries: 0,
-    blocked_domains: 0,
+  // Ad-Block Manager
+  let blocklistSources = $state([]);
+  let adblockStats = $state({
+    total_blocked_domains: 0,
+    active_blocklists: [],
+    hosts_file_size: 0,
   });
-  let blocklists = $state([]);
-  let loadingHosts = $state(false);
-  let newHostIp = $state("0.0.0.0");
-  let newHostname = $state("");
+  let selectedBlocklists = $state([]);
+  let loadingAdblock = $state(false);
+  let applyingBlocklists = $state(false);
+
+  // DNS Manager
+  let dnsProviders = $state([]);
+  let dnsStatus = $state({
+    current_dns: [],
+    active_provider: null,
+  });
+  let selectedDnsProvider = $state(null);
+  let customDnsPrimary = $state("");
+  let customDnsSecondary = $state("");
+  let applyingDns = $state(false);
 
   // Refresh interval
   let refreshInterval = $state(null);
@@ -89,16 +128,20 @@
   // ============================================================================
 
   const navItems = [
-    { id: "dashboard", icon: "📊", label: "Dashboard" },
-    { id: "resources", icon: "📈", label: "Resources" },
-    { id: "cleaner", icon: "🧹", label: "System Cleaner" },
-    { id: "tweaks", icon: "⚙️", label: "Performance Tweaks" },
-    { id: "repositories", icon: "📦", label: "Repositories" },
-    { id: "services", icon: "🔧", label: "Services" },
-    { id: "startup", icon: "🚀", label: "Startup Apps" },
-    { id: "packages", icon: "📥", label: "Packages" },
-    { id: "processes", icon: "⚡", label: "Processes" },
-    { id: "hosts", icon: "🌐", label: "Hosts Editor" },
+    // Overview
+    { id: "dashboard", icon: "⬢", label: "Dashboard" },
+    { id: "resources", icon: "◎", label: "System Monitor" },
+    // System Management
+    { id: "cleaner", icon: "✧", label: "System Cleaner" },
+    { id: "tweaks", icon: "◈", label: "Performance" },
+    { id: "processes", icon: "☰", label: "Process Manager" },
+    // Software & Services
+    { id: "packages", icon: "▣", label: "Packages" },
+    { id: "repositories", icon: "⬡", label: "Repositories" },
+    { id: "services", icon: "⚙", label: "Services" },
+    { id: "startup", icon: "►", label: "Startup Apps" },
+    // Network & Security
+    { id: "hosts", icon: "⛊", label: "Ad-Block & DNS" },
   ];
 
   // ============================================================================
@@ -157,12 +200,36 @@
 
   async function loadCleaner() {
     try {
-      [cleanupCategories, totalReclaimable] = await Promise.all([
-        cleanerService.getCleanupCategories(),
-        cleanerService.getTotalReclaimable(),
-      ]);
+      [cleanupCategories, totalReclaimable, autocleanConfig, autocleanStatus] =
+        await Promise.all([
+          cleanerService.getCleanupCategories(),
+          cleanerService.getTotalReclaimable(),
+          cleanerService.getAutocleanSchedule(),
+          cleanerService.getAutocleanStatus(),
+        ]);
     } catch (e) {
       console.error("Failed to load cleaner:", e);
+    }
+  }
+
+  async function handleSaveAutoclean() {
+    savingAutoclean = true;
+    try {
+      await cleanerService.setAutocleanSchedule(autocleanConfig);
+      autocleanStatus = await cleanerService.getAutocleanStatus();
+    } catch (e) {
+      console.error("Failed to save auto-clean:", e);
+    }
+    savingAutoclean = false;
+  }
+
+  function toggleAutocleanCategory(catId) {
+    if (autocleanConfig.categories.includes(catId)) {
+      autocleanConfig.categories = autocleanConfig.categories.filter(
+        (c) => c !== catId,
+      );
+    } else {
+      autocleanConfig.categories = [...autocleanConfig.categories, catId];
     }
   }
 
@@ -234,14 +301,48 @@
   async function loadRepositories() {
     loadingRepos = true;
     try {
-      [repositories, mirrors] = await Promise.all([
+      [repositories, mirrors, regionInfo, aptFastStatus] = await Promise.all([
         reposService.getRepositories(),
-        reposService.getMirrors(),
+        reposService.getMirrors(selectedRegion),
+        reposService.getRegionInfo(),
+        reposService.checkAptFast(),
       ]);
+      // Auto-select detected region on first load
+      if (selectedRegion === "ALL" && regionInfo.detected_code) {
+        selectedRegion = regionInfo.detected_code;
+        mirrors = await reposService.getMirrors(selectedRegion);
+      }
     } catch (e) {
       console.error("Failed to load repositories:", e);
     }
     loadingRepos = false;
+  }
+
+  async function handleInstallAptFast() {
+    installingAptFast = true;
+    try {
+      await reposService.installAptFast();
+      aptFastStatus = await reposService.checkAptFast();
+    } catch (e) {
+      console.error("Failed to install apt-fast:", e);
+    }
+    installingAptFast = false;
+  }
+
+  async function handleDeleteRepo(filePath, isWholeFile) {
+    deletingRepo = filePath;
+    try {
+      await reposService.deleteRepository(filePath, isWholeFile);
+      await loadRepositories();
+    } catch (e) {
+      console.error("Failed to delete repo:", e);
+    }
+    deletingRepo = null;
+  }
+
+  async function handleRegionChange(region) {
+    selectedRegion = region;
+    mirrors = await reposService.getMirrors(region);
   }
 
   async function loadResources() {
@@ -249,23 +350,47 @@
       const snapshot = await resourcesService.getResourceSnapshot();
       await resourcesService.addResourceSnapshot(snapshot);
       resourceHistory = await resourcesService.getResourceHistory();
+
+      // Load GPU info only once (or refresh occasionally)
+      if (!gpuInfo) {
+        gpuInfo = await resourcesService.getGpuInfo();
+      }
     } catch (e) {
       console.error("Failed to load resources:", e);
     }
   }
 
-  async function loadHosts() {
-    loadingHosts = true;
+  async function loadAdblock() {
+    loadingAdblock = true;
     try {
-      [hostEntries, hostsStats, blocklists] = await Promise.all([
-        hostsService.getHosts(),
-        hostsService.getHostsStats(),
-        hostsService.getBlocklists(),
+      [blocklistSources, adblockStats] = await Promise.all([
+        hostsService.getBlocklistSources(),
+        hostsService.getAdBlockStats(),
       ]);
+      // Pre-select enabled blocklists
+      selectedBlocklists = blocklistSources
+        .filter((s) => s.is_enabled)
+        .map((s) => s.id);
     } catch (e) {
-      console.error("Failed to load hosts:", e);
+      console.error("Failed to load adblock:", e);
     }
-    loadingHosts = false;
+    loadingAdblock = false;
+  }
+
+  async function loadDns() {
+    try {
+      [dnsProviders, dnsStatus] = await Promise.all([
+        dnsService.getDnsProviders(),
+        dnsService.getCurrentDns(),
+      ]);
+      selectedDnsProvider = dnsStatus.active_provider;
+    } catch (e) {
+      console.error("Failed to load dns:", e);
+    }
+  }
+
+  async function loadHosts() {
+    await Promise.all([loadAdblock(), loadDns()]);
   }
 
   // ============================================================================
@@ -371,43 +496,66 @@
     }
   }
 
-  async function handleAddHost() {
-    if (!newHostname.trim()) return;
-    try {
-      await hostsService.addHost(newHostIp, newHostname.trim());
-      newHostname = "";
-      await loadHosts();
-    } catch (e) {
-      console.error("Failed to add host:", e);
+  // Ad-Block Actions
+  function toggleBlocklistSelection(id) {
+    if (selectedBlocklists.includes(id)) {
+      selectedBlocklists = selectedBlocklists.filter((s) => s !== id);
+    } else {
+      selectedBlocklists = [...selectedBlocklists, id];
     }
   }
 
-  async function handleToggleHost(lineNumber) {
+  async function handleApplyBlocklists() {
+    if (selectedBlocklists.length === 0) return;
+    applyingBlocklists = true;
     try {
-      await hostsService.toggleHost(lineNumber);
-      await loadHosts();
+      const count = await hostsService.applyBlocklists(selectedBlocklists);
+      console.log(`Applied ${count} blocked domains`);
+      await loadAdblock();
     } catch (e) {
-      console.error("Failed to toggle host:", e);
+      console.error("Failed to apply blocklists:", e);
     }
+    applyingBlocklists = false;
   }
 
-  async function handleRemoveHost(lineNumber) {
+  async function handleClearBlocklists() {
+    applyingBlocklists = true;
     try {
-      await hostsService.removeHost(lineNumber);
-      await loadHosts();
+      await hostsService.clearBlocklists();
+      selectedBlocklists = [];
+      await loadAdblock();
     } catch (e) {
-      console.error("Failed to remove host:", e);
+      console.error("Failed to clear blocklists:", e);
     }
+    applyingBlocklists = false;
   }
 
-  async function handleImportBlocklist(url) {
+  // DNS Actions
+  async function handleApplyDns() {
+    applyingDns = true;
     try {
-      const count = await hostsService.importBlocklist(url);
-      console.log(`Imported ${count} entries`);
-      await loadHosts();
+      if (selectedDnsProvider === "custom") {
+        await dnsService.setCustomDns(customDnsPrimary, customDnsSecondary);
+      } else if (selectedDnsProvider) {
+        await dnsService.setDnsProvider(selectedDnsProvider);
+      }
+      await loadDns();
     } catch (e) {
-      console.error("Failed to import blocklist:", e);
+      console.error("Failed to apply DNS:", e);
     }
+    applyingDns = false;
+  }
+
+  async function handleResetDns() {
+    applyingDns = true;
+    try {
+      await dnsService.resetDns();
+      selectedDnsProvider = null;
+      await loadDns();
+    } catch (e) {
+      console.error("Failed to reset DNS:", e);
+    }
+    applyingDns = false;
   }
 
   // ============================================================================
@@ -465,9 +613,44 @@
     diskStats.find((d) => d.mount_point === "/") || diskStats[0],
   );
   let diskPercent = $derived(mainDisk?.usage_percent ?? 0);
-  let filteredServices = $derived(services.slice(0, 100)); // Limit for perf
-  let filteredPackages = $derived(packages.slice(0, 100));
-  let filteredProcesses = $derived(processes.slice(0, 100));
+  let filteredServices = $derived(
+    services
+      .filter(
+        (s) =>
+          selectedServiceCategory === "ALL" ||
+          s.category === selectedServiceCategory,
+      )
+      .slice(0, 100),
+  );
+  let filteredPackages = $derived(
+    packages
+      .filter(
+        (p) =>
+          selectedPackageCategory === "ALL" ||
+          p.category === selectedPackageCategory,
+      )
+      .slice(0, 100),
+  );
+  let filteredProcesses = $derived(
+    processes
+      .filter(
+        (p) =>
+          selectedProcessCategory === "ALL" ||
+          p.category === selectedProcessCategory,
+      )
+      .slice(0, 100),
+  );
+
+  // Get unique categories for dropdowns
+  let serviceCategories = $derived(
+    [...new Set(services.map((s) => s.category))].sort(),
+  );
+  let packageCategories = $derived(
+    [...new Set(packages.map((p) => p.category))].sort(),
+  );
+  let processCategories = $derived(
+    [...new Set(processes.map((p) => p.category))].sort(),
+  );
 </script>
 
 <div class="flex h-screen bg-surface-900 overflow-hidden">
@@ -798,6 +981,101 @@
               </div>
             {/each}
           </div>
+
+          <!-- Auto-Clean Settings -->
+          <div class="card mt-6">
+            <h3 class="font-semibold mb-4 flex items-center gap-2">
+              <span class="text-xl">⏰</span> Scheduled Cleaning
+            </h3>
+
+            <div class="space-y-4">
+              <!-- Enable Toggle -->
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="font-medium">Enable Auto-Clean</p>
+                  <p class="text-sm text-gray-500">
+                    Automatically clean selected categories on schedule
+                  </p>
+                </div>
+                <button
+                  class="toggle"
+                  class:bg-primary-600={autocleanConfig.enabled}
+                  onclick={() =>
+                    (autocleanConfig.enabled = !autocleanConfig.enabled)}
+                  aria-label="Toggle auto-clean"
+                >
+                  <span
+                    class="toggle-dot"
+                    class:translate-x-5={autocleanConfig.enabled}
+                  ></span>
+                </button>
+              </div>
+
+              {#if autocleanConfig.enabled}
+                <!-- Interval Selection -->
+                <div>
+                  <p class="text-sm text-gray-400 mb-2">Clean every:</p>
+                  <div class="flex gap-2">
+                    {#each ["daily", "weekly", "monthly"] as interval}
+                      <button
+                        class="px-4 py-2 rounded-lg text-sm transition-all {autocleanConfig.interval ===
+                        interval
+                          ? 'bg-primary-600 text-white'
+                          : 'bg-surface-700 text-gray-300 hover:bg-surface-600'}"
+                        onclick={() => (autocleanConfig.interval = interval)}
+                      >
+                        {interval.charAt(0).toUpperCase() + interval.slice(1)}
+                      </button>
+                    {/each}
+                  </div>
+                </div>
+
+                <!-- Category Selection -->
+                <div>
+                  <p class="text-sm text-gray-400 mb-2">
+                    Categories to auto-clean:
+                  </p>
+                  <div class="grid grid-cols-2 gap-2">
+                    {#each cleanupCategories.filter((c) => !c.requires_root) as category}
+                      <label
+                        class="flex items-center gap-2 p-2 rounded-lg bg-surface-800 hover:bg-surface-700 cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={autocleanConfig.categories.includes(
+                            category.id,
+                          )}
+                          onchange={() => toggleAutocleanCategory(category.id)}
+                          class="w-4 h-4 accent-primary-500"
+                        />
+                        <span class="text-sm"
+                          >{category.icon} {category.name}</span
+                        >
+                      </label>
+                    {/each}
+                  </div>
+                </div>
+
+                <!-- Status -->
+                <div class="text-sm text-gray-400">
+                  Status: <span class="text-white">{autocleanStatus}</span>
+                </div>
+              {/if}
+
+              <!-- Save Button -->
+              <button
+                class="btn btn-primary w-full"
+                onclick={handleSaveAutoclean}
+                disabled={savingAutoclean}
+              >
+                {#if savingAutoclean}
+                  <span class="spinner"></span>
+                {:else}
+                  {autocleanConfig.enabled ? "Save & Enable" : "Save & Disable"}
+                {/if}
+              </button>
+            </div>
+          </div>
         </div>
       {:else if currentPage === "tweaks"}
         <!-- Tweaks -->
@@ -822,50 +1100,151 @@
                 <span class="text-xl">{category.icon}</span>
                 <h3 class="font-semibold">{category.name}</h3>
               </div>
-              <div class="space-y-3">
+              <div class="space-y-4">
                 {#each category.tweaks as tweak}
-                  <div
-                    class="list-item"
-                    class:border-emerald-500={tweak.is_applied}
-                  >
-                    <div class="flex-1">
+                  <div class="p-3 bg-surface-800/50 rounded-lg">
+                    <div class="flex items-center justify-between mb-2">
                       <div class="flex items-center gap-2">
                         <span class="font-medium">{tweak.name}</span>
                         {#if tweak.is_applied}
-                          <span class="badge badge-success">Applied</span>
+                          <span class="badge badge-success text-xs"
+                            >Applied</span
+                          >
                         {/if}
                       </div>
-                      <p class="text-sm text-gray-500 mt-1">
-                        {tweak.description}
-                      </p>
-                      <div class="flex gap-4 mt-2 text-xs">
-                        <span
-                          >Current: <span class="text-gray-300"
+                      {#if tweak.tweak_type === "slider"}
+                        <span class="text-sm text-gray-400">
+                          Current: <span class="text-white"
                             >{tweak.current_value}</span
-                          ></span
-                        >
-                        <span
-                          >Recommended: <span class="text-accent-400"
+                          >
+                          <span class="mx-1">•</span>
+                          Rec:
+                          <span class="text-accent-400"
                             >{tweak.recommended_value}</span
-                          ></span
-                        >
-                      </div>
+                          >
+                        </span>
+                      {/if}
                     </div>
-                    {#if !tweak.is_applied}
+                    <p class="text-xs text-gray-500 mb-3">
+                      {tweak.description}
+                    </p>
+
+                    {#if tweak.tweak_type === "slider" && tweak.min_value !== null && tweak.max_value !== null}
+                      <!-- Slider UI -->
+                      <div class="flex items-center gap-3">
+                        <span class="text-xs text-gray-500 w-8"
+                          >{tweak.min_value}</span
+                        >
+                        <input
+                          type="range"
+                          min={tweak.min_value}
+                          max={tweak.max_value}
+                          value={tweak.current_value}
+                          class="flex-1 h-2 bg-surface-700 rounded-lg appearance-none cursor-pointer accent-primary-500"
+                          onchange={(e) =>
+                            handleApplyTweak(tweak.id, e.target.value)}
+                        />
+                        <span class="text-xs text-gray-500 w-8 text-right"
+                          >{tweak.max_value}</span
+                        >
+                        <button
+                          class="btn btn-sm btn-primary"
+                          disabled={applyingTweak === tweak.id}
+                          onclick={() =>
+                            handleApplyTweak(tweak.id, tweak.recommended_value)}
+                        >
+                          {#if applyingTweak === tweak.id}
+                            <span class="spinner"></span>
+                          {:else}
+                            Set Recommended
+                          {/if}
+                        </button>
+                      </div>
+                    {:else if tweak.tweak_type === "selector" && tweak.options}
+                      <!-- Selector/Dropdown UI -->
+                      <div class="flex items-center gap-2 flex-wrap">
+                        {#each tweak.options as option}
+                          <button
+                            class="px-3 py-1.5 rounded-lg text-sm transition-all {tweak.current_value ===
+                            option
+                              ? 'bg-primary-600 text-white'
+                              : 'bg-surface-700 text-gray-300 hover:bg-surface-600'}"
+                            disabled={applyingTweak === tweak.id}
+                            onclick={() => handleApplyTweak(tweak.id, option)}
+                          >
+                            {#if tweak.id === "rmem_max" || tweak.id === "wmem_max"}
+                              {parseInt(option) >= 1048576
+                                ? `${(parseInt(option) / 1048576).toFixed(0)} MB`
+                                : option}
+                            {:else}
+                              {option}
+                            {/if}
+                            {#if option === tweak.recommended_value}
+                              <span class="ml-1 text-xs text-accent-300">★</span
+                              >
+                            {/if}
+                          </button>
+                        {/each}
+                      </div>
+                    {:else if tweak.tweak_type === "preset" && tweak.options}
+                      <!-- CPU Governor Preset Buttons -->
+                      <div class="flex gap-2">
+                        {#each ["powersave", "schedutil", "performance"] as mode}
+                          {#if tweak.options.includes(mode) || (mode === "schedutil" && tweak.options.includes("ondemand"))}
+                            {@const actualMode =
+                              mode === "schedutil" &&
+                              !tweak.options.includes("schedutil")
+                                ? "ondemand"
+                                : mode}
+                            <button
+                              class="flex-1 py-3 rounded-lg text-center transition-all {tweak.current_value ===
+                              actualMode
+                                ? 'bg-primary-600 text-white ring-2 ring-primary-400'
+                                : 'bg-surface-700 text-gray-300 hover:bg-surface-600'}"
+                              disabled={applyingTweak === tweak.id}
+                              onclick={() =>
+                                handleApplyTweak(tweak.id, actualMode)}
+                            >
+                              <div class="text-2xl mb-1">
+                                {mode === "powersave"
+                                  ? "🔋"
+                                  : mode === "schedutil"
+                                    ? "⚖️"
+                                    : "⚡"}
+                              </div>
+                              <div class="text-sm font-medium">
+                                {mode === "powersave"
+                                  ? "Power Saver"
+                                  : mode === "schedutil"
+                                    ? "Balanced"
+                                    : "Performance"}
+                              </div>
+                              {#if mode === "performance"}
+                                <div class="text-xs text-accent-300 mt-1">
+                                  Recommended
+                                </div>
+                              {/if}
+                            </button>
+                          {/if}
+                        {/each}
+                      </div>
+                    {:else}
+                      <!-- Fallback: Simple Apply Button -->
                       <button
                         class="btn btn-primary btn-sm"
-                        disabled={applyingTweak === tweak.id}
+                        disabled={applyingTweak === tweak.id ||
+                          tweak.is_applied}
                         onclick={() =>
                           handleApplyTweak(tweak.id, tweak.recommended_value)}
                       >
                         {#if applyingTweak === tweak.id}
                           <span class="spinner"></span>
+                        {:else if tweak.is_applied}
+                          ✓ Applied
                         {:else}
-                          Apply
+                          Apply Recommended
                         {/if}
                       </button>
-                    {:else}
-                      <span class="text-emerald-400">✓</span>
                     {/if}
                   </div>
                 {/each}
@@ -884,6 +1263,15 @@
               bind:value={servicesFilter}
               oninput={() => loadServices()}
             />
+            <select
+              class="bg-surface-800 text-white border border-white/20 rounded-lg px-4 py-2 text-sm cursor-pointer"
+              bind:value={selectedServiceCategory}
+            >
+              <option value="ALL">📋 All Categories</option>
+              {#each serviceCategories as cat}
+                <option value={cat}>{cat}</option>
+              {/each}
+            </select>
           </div>
 
           {#if loadingServices}
@@ -900,6 +1288,11 @@
                   <div class="flex-1">
                     <div class="flex items-center gap-2">
                       <span class="font-medium">{service.name}</span>
+                      <span
+                        class="badge"
+                        style="background: rgba(99,102,241,0.2); color: #818cf8;"
+                        >{service.category}</span
+                      >
                       {#if service.active_state === "active"}
                         <span class="badge badge-success">Active</span>
                       {:else}
@@ -1004,6 +1397,15 @@
               bind:value={packagesFilter}
               oninput={() => loadPackages()}
             />
+            <select
+              class="bg-surface-800 text-white border border-white/20 rounded-lg px-4 py-2 text-sm cursor-pointer"
+              bind:value={selectedPackageCategory}
+            >
+              <option value="ALL">📦 All Categories</option>
+              {#each packageCategories as cat}
+                <option value={cat}>{cat}</option>
+              {/each}
+            </select>
           </div>
 
           {#if loadingPackages}
@@ -1020,6 +1422,11 @@
                   <div class="flex-1">
                     <div class="flex items-center gap-2">
                       <span class="font-medium">{pkg.name}</span>
+                      <span
+                        class="badge"
+                        style="background: rgba(236,72,153,0.2); color: #f472b6;"
+                        >{pkg.category}</span
+                      >
                       {#if pkg.is_auto}
                         <span class="badge badge-info text-xs">Auto</span>
                       {/if}
@@ -1056,8 +1463,28 @@
               bind:value={processesFilter}
               oninput={() => loadProcesses()}
             />
+            <select
+              class="bg-surface-800 text-white border border-white/20 rounded-lg px-4 py-2 text-sm cursor-pointer"
+              bind:value={selectedProcessCategory}
+            >
+              <option value="ALL">🔄 All Processes</option>
+              {#each processCategories as cat}
+                <option value={cat}>{cat}</option>
+              {/each}
+            </select>
             <button class="btn btn-secondary" onclick={loadProcesses}>
               Refresh
+            </button>
+            <button
+              class="btn btn-danger"
+              onclick={async () => {
+                const result = await invoke("bulk_terminate_apps");
+                alert(result.message);
+                loadProcesses();
+              }}
+              title="Terminate all app processes to free RAM"
+            >
+              🧹 Clean Apps RAM
             </button>
           </div>
 
@@ -1075,6 +1502,11 @@
                   <div class="flex-1">
                     <div class="flex items-center gap-2">
                       <span class="font-medium">{proc.name}</span>
+                      <span
+                        class="badge"
+                        style="background: rgba(34,197,94,0.2); color: #4ade80;"
+                        >{proc.category}</span
+                      >
                       <span class="badge badge-info">PID: {proc.pid}</span>
                     </div>
                     <div class="flex gap-4 text-sm text-gray-500 mt-1">
@@ -1083,12 +1515,29 @@
                       <span class="truncate max-w-xs">{proc.command}</span>
                     </div>
                   </div>
-                  <button
-                    class="btn btn-danger btn-sm"
-                    onclick={() => handleKillProcess(proc.pid)}
-                  >
-                    Kill
-                  </button>
+                  {#if proc.is_killable}
+                    <div class="flex gap-2">
+                      <button
+                        class="btn btn-warning btn-sm"
+                        onclick={() => handleKillProcess(proc.pid)}
+                        title="Terminate (SIGTERM)"
+                      >
+                        Terminate
+                      </button>
+                      <button
+                        class="btn btn-danger btn-sm"
+                        onclick={async () => {
+                          await invoke("force_kill_process", { pid: proc.pid });
+                          loadProcesses();
+                        }}
+                        title="Force Kill (SIGKILL)"
+                      >
+                        Kill
+                      </button>
+                    </div>
+                  {:else}
+                    <span class="badge badge-danger text-xs">System</span>
+                  {/if}
                 </div>
               {/each}
             </div>
@@ -1097,6 +1546,43 @@
       {:else if currentPage === "repositories"}
         <!-- Repositories -->
         <div class="space-y-6">
+          <!-- apt-fast Card -->
+          <div
+            class="card bg-gradient-to-r from-primary-900/50 to-accent-900/50 border border-primary-500/30"
+          >
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <span class="text-3xl">🚀</span>
+                <div>
+                  <h3 class="font-semibold">apt-fast</h3>
+                  <p class="text-sm text-gray-400">
+                    Parallel downloads for faster package installation
+                  </p>
+                </div>
+              </div>
+              {#if aptFastStatus.installed}
+                <div class="flex items-center gap-3">
+                  <span class="badge badge-success">Installed</span>
+                  <span class="text-sm text-gray-400"
+                    >{aptFastStatus.max_connections} connections</span
+                  >
+                </div>
+              {:else}
+                <button
+                  class="btn btn-primary"
+                  onclick={handleInstallAptFast}
+                  disabled={installingAptFast}
+                >
+                  {#if installingAptFast}
+                    <span class="spinner"></span> Installing...
+                  {:else}
+                    Install apt-fast
+                  {/if}
+                </button>
+              {/if}
+            </div>
+          </div>
+
           <div class="card">
             <h3 class="font-semibold mb-4">Manage Repositories</h3>
 
@@ -1116,7 +1602,25 @@
             <!-- Mirrors -->
             <div class="border-t border-white/10 pt-6">
               <div class="flex items-center justify-between mb-4">
-                <h4 class="font-medium">Ubuntu Mirrors</h4>
+                <div class="flex items-center gap-4">
+                  <h4 class="font-medium">Ubuntu Mirrors</h4>
+                  <!-- Region Dropdown -->
+                  <select
+                    class="bg-surface-800 text-white border border-white/20 rounded-lg px-4 py-2 text-sm cursor-pointer hover:border-primary-500 focus:border-primary-500 focus:outline-none"
+                    bind:value={selectedRegion}
+                    onchange={(e) => handleRegionChange(e.currentTarget.value)}
+                  >
+                    <option value="ALL">🌍 All Regions</option>
+                    {#each regionInfo.available_regions as [code, name]}
+                      <option value={code}>{name} ({code})</option>
+                    {/each}
+                  </select>
+                  {#if regionInfo.detected_code}
+                    <span class="text-xs text-gray-500">
+                      Detected: {regionInfo.detected_country}
+                    </span>
+                  {/if}
+                </div>
                 <button
                   class="btn btn-secondary btn-sm"
                   disabled={testingMirrors}
@@ -1130,36 +1634,45 @@
                 </button>
               </div>
 
-              <div
-                class="bg-surface-800 rounded-lg p-2 max-h-40 overflow-y-auto"
-              >
+              <div class="grid grid-cols-2 gap-2 max-h-60 overflow-y-auto">
                 {#each mirrors as mirror}
-                  <div
-                    class="flex items-center justify-between p-2 hover:bg-surface-700 rounded cursor-pointer"
+                  <button
+                    class="flex items-center justify-between p-3 bg-surface-800 hover:bg-surface-700 rounded-lg text-left transition-all"
                     onclick={() => handleSetMirror(mirror.uri)}
                   >
-                    <div class="flex flex-col">
-                      <span class="text-sm font-medium"
-                        >{mirror.name} ({mirror.country})</span
+                    <div class="flex flex-col min-w-0">
+                      <span class="text-sm font-medium truncate"
+                        >{mirror.name}</span
                       >
                       <span class="text-xs text-gray-500 truncate"
                         >{mirror.uri}</span
                       >
                     </div>
-                    <div class="flex items-center gap-2">
+                    <div class="flex items-center gap-2 ml-2 shrink-0">
+                      <span class="text-xs text-gray-400"
+                        >{mirror.country_code}</span
+                      >
                       {#if mirror.latency_ms !== null}
                         <span
-                          class="text-xs font-mono {mirror.latency_ms < 100
-                            ? 'text-green-400'
-                            : 'text-yellow-400'}"
+                          class="text-xs font-mono px-2 py-0.5 rounded {mirror.latency_ms <
+                          100
+                            ? 'bg-green-500/20 text-green-400'
+                            : mirror.latency_ms < 300
+                              ? 'bg-yellow-500/20 text-yellow-400'
+                              : 'bg-red-500/20 text-red-400'}"
                         >
                           {mirror.latency_ms}ms
                         </span>
                       {/if}
                     </div>
-                  </div>
+                  </button>
                 {/each}
               </div>
+              {#if mirrors.length === 0}
+                <p class="text-center text-gray-500 py-4">
+                  No mirrors for selected region
+                </p>
+              {/if}
             </div>
           </div>
 
@@ -1192,6 +1705,7 @@
                       class="toggle"
                       class:bg-primary-600={repo.is_enabled}
                       class:bg-surface-700={!repo.is_enabled}
+                      aria-label="Toggle repository"
                       onclick={() =>
                         invoke("toggle_repository", {
                           filePath: repo.file_path,
@@ -1207,12 +1721,15 @@
                     {#if repo.is_ppa}
                       <button
                         class="btn btn-danger btn-sm"
-                        onclick={() =>
-                          reposService
-                            .removePpa(repo.uri)
-                            .then(loadRepositories)}
+                        disabled={deletingRepo === repo.file_path}
+                        onclick={() => handleDeleteRepo(repo.file_path, true)}
+                        aria-label="Delete repository"
                       >
-                        ✕
+                        {#if deletingRepo === repo.file_path}
+                          <span class="spinner w-3 h-3"></span>
+                        {:else}
+                          🗑️
+                        {/if}
                       </button>
                     {/if}
                   </div>
@@ -1222,25 +1739,97 @@
           {/if}
         </div>
       {:else if currentPage === "resources"}
-        <!-- Resources -->
+        <!-- Enhanced Resources Monitor -->
         <div class="space-y-6">
-          <!-- CPU Chart -->
+          <!-- CPU Section -->
           <div class="card">
-            <h3 class="font-semibold mb-4 flex items-center gap-2">
-              <span class="text-xl">⚡</span> CPU History
-            </h3>
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="font-semibold flex items-center gap-2">
+                <span class="text-xl">⚡</span> CPU
+              </h3>
+              <div class="text-right">
+                <span class="text-2xl font-bold text-gradient">
+                  {resourceHistory.snapshots.length > 0
+                    ? resourceHistory.snapshots[
+                        resourceHistory.snapshots.length - 1
+                      ].cpu_percent.toFixed(0)
+                    : 0}%
+                </span>
+              </div>
+            </div>
+
+            <!-- CPU Info -->
+            {#if systemInfo}
+              <div class="mb-4 text-sm text-gray-400">
+                <span class="text-white font-medium"
+                  >{systemInfo.cpu_model}</span
+                >
+                <span class="mx-2">•</span>
+                <span
+                  >{systemInfo.cpu_cores} Cores / {systemInfo.cpu_threads} Threads</span
+                >
+                {#if cpuStats?.frequency_mhz}
+                  <span class="mx-2">•</span>
+                  <span>{(cpuStats.frequency_mhz / 1000).toFixed(2)} GHz</span>
+                {/if}
+              </div>
+            {/if}
+
+            <!-- Per-Core Usage Bars -->
+            {#if resourceHistory.snapshots.length > 0}
+              {@const latestSnapshot =
+                resourceHistory.snapshots[resourceHistory.snapshots.length - 1]}
+              {#if latestSnapshot.per_core_percent && latestSnapshot.per_core_percent.length > 0}
+                <div class="grid grid-cols-8 gap-2 mb-4">
+                  {#each latestSnapshot.per_core_percent as coreUsage, i}
+                    <div class="text-center">
+                      <div
+                        class="h-16 bg-surface-800 rounded-lg relative overflow-hidden"
+                      >
+                        <div
+                          class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-primary-600 to-primary-400 transition-all duration-300"
+                          style="height: {coreUsage}%"
+                        ></div>
+                      </div>
+                      <span class="text-xs text-gray-500 mt-1 block"
+                        >{coreUsage.toFixed(0)}%</span
+                      >
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+            {/if}
+
+            <!-- CPU Graph with Grid Lines -->
             <div
-              class="relative h-48 bg-surface-900/50 rounded-lg overflow-hidden flex items-end"
+              class="relative h-32 bg-surface-900/50 rounded-lg overflow-hidden"
             >
               <!-- Grid lines -->
               <div
-                class="absolute inset-x-0 bottom-0 h-full border-b border-surface-700"
-              ></div>
-              <div
-                class="absolute inset-x-0 bottom-1/2 h-px bg-surface-700/50 dashed"
-              ></div>
-
-              <!-- Chart -->
+                class="absolute inset-0 flex flex-col justify-between pointer-events-none"
+              >
+                <div
+                  class="border-b border-surface-700/50 h-0 flex items-center"
+                >
+                  <span class="text-[10px] text-gray-600 ml-1">100%</span>
+                </div>
+                <div
+                  class="border-b border-surface-700/50 h-0 flex items-center"
+                >
+                  <span class="text-[10px] text-gray-600 ml-1">75%</span>
+                </div>
+                <div
+                  class="border-b border-surface-700/50 h-0 flex items-center"
+                >
+                  <span class="text-[10px] text-gray-600 ml-1">50%</span>
+                </div>
+                <div
+                  class="border-b border-surface-700/50 h-0 flex items-center"
+                >
+                  <span class="text-[10px] text-gray-600 ml-1">25%</span>
+                </div>
+                <div class="h-0"></div>
+              </div>
               <svg
                 class="w-full h-full"
                 viewBox="0 0 100 100"
@@ -1260,7 +1849,6 @@
                   stroke-width="2"
                 />
               </svg>
-              <!-- Gradient fill under line (simulated) -->
               <div
                 class="absolute inset-0 bg-gradient-to-t from-primary-500/20 to-transparent pointer-events-none"
               ></div>
@@ -1271,14 +1859,101 @@
             </div>
           </div>
 
-          <!-- Network Chart -->
+          <!-- GPU Section -->
+          {#if gpuInfo}
+            <div class="card">
+              <div class="flex items-center justify-between mb-4">
+                <h3 class="font-semibold flex items-center gap-2">
+                  <span class="text-xl">�</span> GPU
+                </h3>
+                {#if gpuInfo.usage_percent !== null}
+                  <span class="text-lg font-bold text-gradient"
+                    >{gpuInfo.usage_percent.toFixed(0)}%</span
+                  >
+                {/if}
+              </div>
+
+              <div class="text-sm text-gray-400 mb-4">
+                <span class="text-white font-medium">{gpuInfo.name}</span>
+                {#if gpuInfo.driver_version}
+                  <span class="mx-2">•</span>
+                  <span>Driver: {gpuInfo.driver_version}</span>
+                {/if}
+              </div>
+
+              {#if gpuInfo.vram_total_mb > 0}
+                <div class="mb-4">
+                  <div class="flex justify-between text-sm mb-1">
+                    <span class="text-gray-400">VRAM</span>
+                    <span
+                      >{gpuInfo.vram_used_mb} MB / {gpuInfo.vram_total_mb} MB</span
+                    >
+                  </div>
+                  <div class="h-4 bg-surface-800 rounded-full overflow-hidden">
+                    <div
+                      class="h-full bg-gradient-to-r from-emerald-600 to-emerald-400"
+                      style="width: {(gpuInfo.vram_used_mb /
+                        gpuInfo.vram_total_mb) *
+                        100}%"
+                    ></div>
+                  </div>
+                </div>
+              {/if}
+
+              {#if gpuInfo.temperature_c !== null}
+                <div class="flex items-center gap-4 text-sm">
+                  <span class="text-gray-400">Temperature:</span>
+                  <span
+                    class="font-medium {gpuInfo.temperature_c > 80
+                      ? 'text-red-400'
+                      : gpuInfo.temperature_c > 60
+                        ? 'text-yellow-400'
+                        : 'text-emerald-400'}"
+                  >
+                    {gpuInfo.temperature_c.toFixed(0)}°C
+                  </span>
+                </div>
+              {/if}
+            </div>
+          {/if}
+
+          <!-- Network Section -->
           <div class="card">
-            <h3 class="font-semibold mb-4 flex items-center gap-2">
-              <span class="text-xl">🌐</span> Network Traffic
-            </h3>
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="font-semibold flex items-center gap-2">
+                <span class="text-xl">🌐</span> Network
+              </h3>
+              <div class="flex gap-4 text-sm">
+                <span class="text-emerald-400">
+                  ⬇ {formatBytes(
+                    resourceHistory.net_rx_speed[
+                      resourceHistory.net_rx_speed.length - 1
+                    ] || 0,
+                  )}/s
+                </span>
+                <span class="text-blue-400">
+                  ⬆ {formatBytes(
+                    resourceHistory.net_tx_speed[
+                      resourceHistory.net_tx_speed.length - 1
+                    ] || 0,
+                  )}/s
+                </span>
+              </div>
+            </div>
+
             <div
-              class="relative h-48 bg-surface-900/50 rounded-lg overflow-hidden"
+              class="relative h-32 bg-surface-900/50 rounded-lg overflow-hidden"
             >
+              <!-- Grid lines -->
+              <div
+                class="absolute inset-0 flex flex-col justify-between pointer-events-none"
+              >
+                <div class="border-b border-surface-700/30 h-0"></div>
+                <div class="border-b border-surface-700/30 h-0"></div>
+                <div class="border-b border-surface-700/30 h-0"></div>
+                <div class="border-b border-surface-700/30 h-0"></div>
+                <div class="h-0"></div>
+              </div>
               <svg
                 class="w-full h-full"
                 viewBox="0 0 100 100"
@@ -1291,8 +1966,9 @@
                     .map((s, i) => {
                       const max = Math.max(
                         ...resourceHistory.net_rx_speed,
+                        ...resourceHistory.net_tx_speed,
                         1024,
-                      ); // Min 1KB scale
+                      );
                       return `${(i / Math.max(1, resourceHistory.net_rx_speed.length - 1)) * 100},${100 - (s / max) * 90}`;
                     })
                     .join(" ")}
@@ -1306,6 +1982,7 @@
                   points={resourceHistory.net_tx_speed
                     .map((s, i) => {
                       const max = Math.max(
+                        ...resourceHistory.net_rx_speed,
                         ...resourceHistory.net_tx_speed,
                         1024,
                       );
@@ -1317,125 +1994,361 @@
                   stroke-width="2"
                 />
               </svg>
+            </div>
 
-              <div
-                class="absolute top-2 right-2 text-xs text-right bg-surface-900/80 p-2 rounded"
+            <!-- Legend -->
+            <div class="flex justify-center gap-6 mt-2 text-xs text-gray-500">
+              <span class="flex items-center gap-1"
+                ><span class="w-3 h-1 bg-emerald-500 rounded"></span> Download</span
               >
-                <p class="text-emerald-400">
-                  ⬇ {formatBytes(
-                    resourceHistory.net_rx_speed[
-                      resourceHistory.net_rx_speed.length - 1
+              <span class="flex items-center gap-1"
+                ><span class="w-3 h-1 bg-blue-500 rounded"></span> Upload</span
+              >
+            </div>
+          </div>
+
+          <!-- Disk I/O Section -->
+          <div class="card">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="font-semibold flex items-center gap-2">
+                <span class="text-xl">💾</span> Disk I/O
+              </h3>
+              <div class="flex gap-4 text-sm">
+                <span class="text-cyan-400">
+                  📖 {formatBytes(
+                    resourceHistory.disk_read_speed[
+                      resourceHistory.disk_read_speed.length - 1
                     ] || 0,
                   )}/s
-                </p>
-                <p class="text-blue-400">
-                  ⬆ {formatBytes(
-                    resourceHistory.net_tx_speed[
-                      resourceHistory.net_tx_speed.length - 1
+                </span>
+                <span class="text-orange-400">
+                  ✏️ {formatBytes(
+                    resourceHistory.disk_write_speed[
+                      resourceHistory.disk_write_speed.length - 1
                     ] || 0,
                   )}/s
-                </p>
+                </span>
               </div>
+            </div>
+
+            <div
+              class="relative h-32 bg-surface-900/50 rounded-lg overflow-hidden"
+            >
+              <!-- Grid lines -->
+              <div
+                class="absolute inset-0 flex flex-col justify-between pointer-events-none"
+              >
+                <div class="border-b border-surface-700/30 h-0"></div>
+                <div class="border-b border-surface-700/30 h-0"></div>
+                <div class="border-b border-surface-700/30 h-0"></div>
+                <div class="border-b border-surface-700/30 h-0"></div>
+                <div class="h-0"></div>
+              </div>
+              <svg
+                class="w-full h-full"
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+              >
+                <!-- Read (Cyan) -->
+                <polyline
+                  vector-effect="non-scaling-stroke"
+                  points={resourceHistory.disk_read_speed
+                    .map((s, i) => {
+                      const max = Math.max(
+                        ...resourceHistory.disk_read_speed,
+                        ...resourceHistory.disk_write_speed,
+                        1024,
+                      );
+                      return `${(i / Math.max(1, resourceHistory.disk_read_speed.length - 1)) * 100},${100 - (s / max) * 90}`;
+                    })
+                    .join(" ")}
+                  fill="none"
+                  stroke="#06b6d4"
+                  stroke-width="2"
+                />
+                <!-- Write (Orange) -->
+                <polyline
+                  vector-effect="non-scaling-stroke"
+                  points={resourceHistory.disk_write_speed
+                    .map((s, i) => {
+                      const max = Math.max(
+                        ...resourceHistory.disk_read_speed,
+                        ...resourceHistory.disk_write_speed,
+                        1024,
+                      );
+                      return `${(i / Math.max(1, resourceHistory.disk_write_speed.length - 1)) * 100},${100 - (s / max) * 90}`;
+                    })
+                    .join(" ")}
+                  fill="none"
+                  stroke="#f97316"
+                  stroke-width="2"
+                />
+              </svg>
+            </div>
+
+            <!-- Legend -->
+            <div class="flex justify-center gap-6 mt-2 text-xs text-gray-500">
+              <span class="flex items-center gap-1"
+                ><span class="w-3 h-1 bg-cyan-500 rounded"></span> Read</span
+              >
+              <span class="flex items-center gap-1"
+                ><span class="w-3 h-1 bg-orange-500 rounded"></span> Write</span
+              >
             </div>
           </div>
         </div>
       {:else if currentPage === "hosts"}
-        <!-- Hosts Editor -->
+        <!-- Ad-Block & DNS Manager -->
         <div class="space-y-6">
+          <!-- Stats -->
           <div class="grid grid-cols-3 gap-4">
             <div class="stat-card">
-              <p class="stat-value">{hostsStats.total_entries}</p>
-              <p class="stat-label">Total Entries</p>
-            </div>
-            <div class="stat-card">
-              <p class="stat-value">{hostsStats.enabled_entries}</p>
-              <p class="stat-label">Enabled</p>
-            </div>
-            <div class="stat-card">
-              <p class="stat-value">{hostsStats.blocked_domains}</p>
+              <p class="stat-value">
+                {adblockStats.total_blocked_domains.toLocaleString()}
+              </p>
               <p class="stat-label">Blocked Domains</p>
             </div>
-          </div>
-
-          <div class="card">
-            <h3 class="font-semibold mb-4">Add Entry</h3>
-            <div class="flex gap-4">
-              <input
-                type="text"
-                class="input w-32"
-                placeholder="IP Address"
-                bind:value={newHostIp}
-              />
-              <input
-                type="text"
-                class="input flex-1"
-                placeholder="Hostname (e.g. facebook.com)"
-                bind:value={newHostname}
-              />
-              <button class="btn btn-primary" onclick={handleAddHost}
-                >Add</button
-              >
+            <div class="stat-card">
+              <p class="stat-value">{adblockStats.active_blocklists.length}</p>
+              <p class="stat-label">Active Lists</p>
+            </div>
+            <div class="stat-card">
+              <p class="stat-value">
+                {formatBytes(adblockStats.hosts_file_size)}
+              </p>
+              <p class="stat-label">Hosts File Size</p>
             </div>
           </div>
 
+          <!-- Ad-Block Section -->
           <div class="card">
-            <h3 class="font-semibold mb-4">Import Blocklist</h3>
-            <div class="flex flex-wrap gap-2">
-              {#each blocklists as [name, url]}
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="font-semibold flex items-center gap-2">
+                <span class="text-xl">🛡️</span> Ad-Block Manager
+              </h3>
+              <div class="flex gap-2">
+                <button
+                  class="btn btn-danger btn-sm"
+                  disabled={applyingBlocklists ||
+                    adblockStats.total_blocked_domains === 0}
+                  onclick={handleClearBlocklists}
+                >
+                  {#if applyingBlocklists}
+                    <span class="spinner w-4 h-4"></span>
+                  {:else}
+                    Clear All
+                  {/if}
+                </button>
+                <button
+                  class="btn btn-primary"
+                  disabled={applyingBlocklists ||
+                    selectedBlocklists.length === 0}
+                  onclick={handleApplyBlocklists}
+                >
+                  {#if applyingBlocklists}
+                    <span class="spinner w-4 h-4 mr-2"></span> Applying...
+                  {:else}
+                    Apply Selected ({selectedBlocklists.length})
+                  {/if}
+                </button>
+              </div>
+            </div>
+
+            <p class="text-sm text-gray-400 mb-4">
+              Select blocklists from trusted sources. Changes will be applied to <code
+                class="text-primary-400">/etc/hosts</code
+              >.
+            </p>
+
+            {#if loadingAdblock}
+              <div class="flex justify-center py-8">
+                <div class="spinner w-8 h-8"></div>
+              </div>
+            {:else}
+              <div class="space-y-2">
+                {#each blocklistSources as source}
+                  <div
+                    class="list-item cursor-pointer {selectedBlocklists.includes(
+                      source.id,
+                    )
+                      ? 'border-primary-500 bg-primary-500/10'
+                      : ''}"
+                    onclick={() => toggleBlocklistSelection(source.id)}
+                    role="checkbox"
+                    aria-checked={selectedBlocklists.includes(source.id)}
+                    tabindex="0"
+                    onkeydown={(e) =>
+                      e.key === "Enter" && toggleBlocklistSelection(source.id)}
+                  >
+                    <div class="flex items-center gap-3">
+                      <div
+                        class="w-5 h-5 rounded border-2 flex items-center justify-center transition-colors"
+                        class:border-primary-500={selectedBlocklists.includes(
+                          source.id,
+                        )}
+                        class:bg-primary-500={selectedBlocklists.includes(
+                          source.id,
+                        )}
+                        class:border-gray-500={!selectedBlocklists.includes(
+                          source.id,
+                        )}
+                      >
+                        {#if selectedBlocklists.includes(source.id)}
+                          <span class="text-white text-xs">✓</span>
+                        {/if}
+                      </div>
+                      <div class="flex-1">
+                        <div class="flex items-center gap-2">
+                          <span class="font-medium">{source.name}</span>
+                          {#if source.is_enabled}
+                            <span class="badge badge-success">Active</span>
+                          {/if}
+                        </div>
+                        <p class="text-sm text-gray-500">
+                          {source.description}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          </div>
+
+          <!-- DNS Section -->
+          <div class="card">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="font-semibold flex items-center gap-2">
+                <span class="text-xl">🌐</span> DNS Manager
+              </h3>
+              <div class="flex gap-2">
                 <button
                   class="btn btn-secondary btn-sm"
-                  onclick={() => handleImportBlocklist(url)}
+                  disabled={applyingDns}
+                  onclick={handleResetDns}
                 >
-                  + {name}
+                  Reset to DHCP
                 </button>
-              {/each}
+                <button
+                  class="btn btn-primary"
+                  disabled={applyingDns || !selectedDnsProvider}
+                  onclick={handleApplyDns}
+                >
+                  {#if applyingDns}
+                    <span class="spinner w-4 h-4 mr-2"></span> Applying...
+                  {:else}
+                    Apply DNS
+                  {/if}
+                </button>
+              </div>
+            </div>
+
+            <div class="mb-4 p-3 bg-surface-800 rounded-lg">
+              <p class="text-sm text-gray-400">
+                Current DNS:
+                <span class="text-white font-mono">
+                  {dnsStatus.current_dns.length > 0
+                    ? dnsStatus.current_dns.join(", ")
+                    : "Automatic (DHCP)"}
+                </span>
+                {#if dnsStatus.active_provider}
+                  <span class="badge badge-info ml-2"
+                    >{dnsProviders.find(
+                      (p) => p.id === dnsStatus.active_provider,
+                    )?.name || dnsStatus.active_provider}</span
+                  >
+                {/if}
+              </p>
+            </div>
+
+            <!-- DNS Categories -->
+            {#each ["general", "adblock", "security", "family"] as category}
+              {@const categoryProviders = dnsProviders.filter(
+                (p) => p.category === category,
+              )}
+              {#if categoryProviders.length > 0}
+                <div class="mb-4">
+                  <h4
+                    class="text-sm font-medium text-gray-400 mb-2 uppercase tracking-wide"
+                  >
+                    {category === "general"
+                      ? "⚡ General"
+                      : category === "adblock"
+                        ? "🚫 Ad-Blocking"
+                        : category === "security"
+                          ? "🔒 Security"
+                          : "👨‍👩‍👧‍👦 Family Safe"}
+                  </h4>
+                  <div class="grid grid-cols-2 gap-2">
+                    {#each categoryProviders as provider}
+                      <div
+                        class="p-3 rounded-lg border cursor-pointer transition-all {selectedDnsProvider ===
+                        provider.id
+                          ? 'border-primary-500 bg-primary-500/10'
+                          : 'border-surface-600 hover:border-surface-500'}"
+                        onclick={() => (selectedDnsProvider = provider.id)}
+                        role="radio"
+                        aria-checked={selectedDnsProvider === provider.id}
+                        tabindex="0"
+                        onkeydown={(e) =>
+                          e.key === "Enter" &&
+                          (selectedDnsProvider = provider.id)}
+                      >
+                        <div class="flex items-center gap-2">
+                          <div
+                            class="w-4 h-4 rounded-full border-2 flex items-center justify-center"
+                            class:border-primary-500={selectedDnsProvider ===
+                              provider.id}
+                            class:border-gray-500={selectedDnsProvider !==
+                              provider.id}
+                          >
+                            {#if selectedDnsProvider === provider.id}
+                              <div
+                                class="w-2 h-2 rounded-full bg-primary-500"
+                              ></div>
+                            {/if}
+                          </div>
+                          <div class="flex-1">
+                            <span class="font-medium text-sm"
+                              >{provider.name}</span
+                            >
+                            <p class="text-xs text-gray-500 font-mono">
+                              {provider.primary_dns}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+            {/each}
+
+            <!-- Custom DNS -->
+            <div class="mt-4 pt-4 border-t border-surface-700">
+              <h4
+                class="text-sm font-medium text-gray-400 mb-2 uppercase tracking-wide"
+              >
+                🔧 Custom DNS
+              </h4>
+              <div class="flex gap-4">
+                <input
+                  type="text"
+                  class="input flex-1"
+                  placeholder="Primary DNS (e.g. 1.1.1.1)"
+                  bind:value={customDnsPrimary}
+                  onfocus={() => (selectedDnsProvider = "custom")}
+                />
+                <input
+                  type="text"
+                  class="input flex-1"
+                  placeholder="Secondary DNS (optional)"
+                  bind:value={customDnsSecondary}
+                  onfocus={() => (selectedDnsProvider = "custom")}
+                />
+              </div>
             </div>
           </div>
-
-          {#if loadingHosts}
-            <div class="flex justify-center py-8">
-              <div class="spinner w-8 h-8"></div>
-            </div>
-          {:else}
-            <div class="bg-surface-800 rounded-xl overflow-hidden">
-              <table class="w-full text-sm text-left">
-                <thead class="bg-surface-700 text-gray-400">
-                  <tr>
-                    <th class="p-4">IP</th>
-                    <th class="p-4">Hostnames</th>
-                    <th class="p-4">Action</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-white/5">
-                  {#each hostEntries as entry}
-                    <tr
-                      class="hover:bg-white/5 {entry.is_enabled
-                        ? ''
-                        : 'opacity-50'}"
-                    >
-                      <td class="p-4 font-mono">{entry.ip}</td>
-                      <td class="p-4">{entry.hostnames.join(" ")}</td>
-                      <td class="p-4 flex gap-2">
-                        <button
-                          class="btn btn-sm"
-                          class:btn-secondary={entry.is_enabled}
-                          onclick={() => handleToggleHost(entry.line_number)}
-                        >
-                          {entry.is_enabled ? "Disable" : "Enable"}
-                        </button>
-                        <button
-                          class="btn btn-danger btn-sm"
-                          onclick={() => handleRemoveHost(entry.line_number)}
-                        >
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  {/each}
-                </tbody>
-              </table>
-            </div>
-          {/if}
         </div>
       {/if}
     </div>

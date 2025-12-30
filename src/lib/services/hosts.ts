@@ -1,55 +1,43 @@
-// TypeScript services for hosts commands
+// TypeScript services for Ad-Block Manager
 import { invoke } from '@tauri-apps/api/core';
 
 // ============================================================================
 // Types
 // ============================================================================
 
-export interface HostEntry {
-    line_number: number;
-    ip: string;
-    hostnames: string[];
-    comment: string | null;
+export interface BlocklistSource {
+    id: string;
+    name: string;
+    url: string;
+    description: string;
+    domain_count: number | null;
     is_enabled: boolean;
-    raw_line: string;
 }
 
-export interface HostsStats {
-    total_entries: number;
-    enabled_entries: number;
-    blocked_domains: number;
+export interface AdBlockStats {
+    total_blocked_domains: number;
+    active_blocklists: string[];
+    hosts_file_size: number;
 }
 
 // ============================================================================
 // API Functions
 // ============================================================================
 
-export async function getHosts(): Promise<HostEntry[]> {
-    return invoke('get_hosts');
+export async function getBlocklistSources(): Promise<BlocklistSource[]> {
+    return invoke('get_blocklist_sources');
 }
 
-export async function getHostsStats(): Promise<HostsStats> {
-    return invoke('get_hosts_stats');
+export async function getAdBlockStats(): Promise<AdBlockStats> {
+    return invoke('get_adblock_stats');
 }
 
-export async function addHost(ip: string, hostname: string, comment?: string): Promise<void> {
-    return invoke('add_host', { ip, hostname, comment: comment || null });
+export async function applyBlocklists(sourceIds: string[]): Promise<number> {
+    return invoke('apply_blocklists', { sourceIds });
 }
 
-export async function removeHost(lineNumber: number): Promise<void> {
-    return invoke('remove_host', { lineNumber });
-}
-
-export async function toggleHost(lineNumber: number): Promise<void> {
-    return invoke('toggle_host', { lineNumber });
-}
-
-export async function getBlocklists(): Promise<[string, string][]> {
-    return invoke('get_blocklists');
-}
-
-export async function importBlocklist(url: string): Promise<number> {
-    return invoke('import_blocklist', { url });
+export async function clearBlocklists(): Promise<void> {
+    return invoke('clear_blocklists');
 }
 
 export async function backupHosts(): Promise<string> {

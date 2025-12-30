@@ -1,10 +1,14 @@
-//! Hosts File Editor module
-//! Parse and edit /etc/hosts with blocklist support (async)
+//! Ad-Block Manager module
+//! Manage /etc/hosts blocklists from various GitHub sources (async)
+//! Optimized for large files using temp files and streaming
 
 use crate::error::{AppError, Result};
 use crate::utils::privileged;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fs;
+use std::io::Write;
+use std::path::PathBuf;
 use tokio::time::Duration;
 
 // ============================================================================
@@ -12,305 +16,404 @@ use tokio::time::Duration;
 // ============================================================================
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HostEntry {
-    pub line_number: usize,
-    pub ip: String,
-    pub hostnames: Vec<String>,
-    pub comment: Option<String>,
+pub struct BlocklistSource {
+    pub id: String,
+    pub name: String,
+    pub url: String,
+    pub description: String,
+    pub domain_count: Option<usize>,
     pub is_enabled: bool,
-    pub raw_line: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HostsStats {
-    pub total_entries: usize,
-    pub enabled_entries: usize,
-    pub blocked_domains: usize, // Entries pointing to 0.0.0.0 or 127.0.0.1
+pub struct AdBlockStats {
+    pub total_blocked_domains: usize,
+    pub active_blocklists: Vec<String>,
+    pub hosts_file_size: u64,
 }
 
 // ============================================================================
-// Common Blocklists
+// Blocklist Sources
 // ============================================================================
 
-pub const BLOCKLISTS: &[(&str, &str)] = &[
-    ("StevenBlack (Unified)", "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"),
-    ("AdAway Default", "https://adaway.org/hosts.txt"),
-    ("MVPS Hosts", "https://winhelp2002.mvps.org/hosts.txt"),
+pub const BLOCKLIST_SOURCES: &[(&str, &str, &str, &str)] = &[
+    // (id, name, url, description)
+    (
+        "stevenblack_unified",
+        "StevenBlack Unified",
+        "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
+        "Comprehensive list (~130k domains) - ads, malware, fakenews",
+    ),
+    (
+        "adaway",
+        "AdAway Default",
+        "https://adaway.org/hosts.txt",
+        "Mobile-focused blocking list (~6k domains)",
+    ),
+    (
+        "dan_pollock",
+        "Dan Pollock's Hosts",
+        "https://someonewhocares.org/hosts/hosts",
+        "Well-maintained list (~15k domains)",
+    ),
+    (
+        "mvps",
+        "MVPS Hosts",
+        "https://winhelp2002.mvps.org/hosts.txt",
+        "Long-running Windows-focused list (~10k domains)",
+    ),
+    (
+        "energized_basic",
+        "Energized Basic",
+        "https://energized.pro/basic/formats/hosts.txt",
+        "Balanced protection (~50k domains)",
+    ),
+    (
+        "urlhaus",
+        "URLHaus Malicious",
+        "https://urlhaus.abuse.ch/downloads/hostfile/",
+        "Malware/ransomware URLs from abuse.ch",
+    ),
+    (
+        "1hosts_lite",
+        "1Hosts Lite",
+        "https://o0.pages.dev/Lite/hosts.txt",
+        "Lightweight protection (~30k domains)",
+    ),
+    (
+        "pgl_yoyo",
+        "Peter Lowe's List",
+        "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&showintro=0",
+        "Ad servers list (~3k domains)",
+    ),
+    (
+        "oisd_small",
+        "OISD Small",
+        "https://small.oisd.nl/hosts",
+        "Minimal false positives (~70k domains)",
+    ),
 ];
+
+const HOSTS_PATH: &str = "/etc/hosts";
+const BLOCKLIST_MARKER_START: &str = "# === GLANCE ADBLOCK START ===";
+const BLOCKLIST_MARKER_END: &str = "# === GLANCE ADBLOCK END ===";
 
 // ============================================================================
 // Helper Functions
 // ============================================================================
 
-const HOSTS_PATH: &str = "/etc/hosts";
+/// Create a temporary file with content
+fn create_temp_file(content: &str) -> Result<PathBuf> {
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
 
-/// Parse a single line from hosts file
-fn parse_host_line(line: &str, line_number: usize) -> Option<HostEntry> {
-    let trimmed = line.trim();
-    
-    // Empty line
-    if trimmed.is_empty() {
-        return None;
+    let temp_path = std::env::temp_dir().join(format!("glance_hosts_{}.tmp", timestamp));
+
+    let mut file = fs::File::create(&temp_path)
+        .map_err(|e| AppError::System(format!("Failed to create temp file: {}", e)))?;
+
+    file.write_all(content.as_bytes())
+        .map_err(|e| AppError::System(format!("Failed to write temp file: {}", e)))?;
+
+    Ok(temp_path)
+}
+
+/// Get the base hosts content (without blocklist section)
+fn get_base_hosts_content() -> Result<String> {
+    let content = fs::read_to_string(HOSTS_PATH)
+        .map_err(|e| AppError::System(format!("Failed to read hosts file: {}", e)))?;
+
+    let mut result = Vec::new();
+    let mut in_blocklist_section = false;
+
+    for line in content.lines() {
+        if line.trim() == BLOCKLIST_MARKER_START {
+            in_blocklist_section = true;
+            continue;
+        }
+        if line.trim() == BLOCKLIST_MARKER_END {
+            in_blocklist_section = false;
+            continue;
+        }
+        if !in_blocklist_section {
+            result.push(line.to_string());
+        }
     }
-    
-    // Determine if enabled (not commented)
-    let is_enabled = !trimmed.starts_with('#');
-    let clean_line = trimmed.trim_start_matches('#').trim();
-    
-    // Skip pure comments without IP
-    if clean_line.is_empty() {
-        return None;
+
+    Ok(result.join("\n"))
+}
+
+/// Parse valid block entries from blocklist content
+fn parse_blocklist_entries(content: &str) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut entries = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        // Skip comments and empty lines
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        // Must start with 0.0.0.0 or 127.0.0.1
+        if !trimmed.starts_with("0.0.0.0") && !trimmed.starts_with("127.0.0.1") {
+            continue;
+        }
+
+        // Extract hostname (second part)
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        if parts.len() < 2 {
+            continue;
+        }
+
+        let hostname = parts[1];
+
+        // Skip localhost entries
+        if hostname == "localhost"
+            || hostname == "localhost.localdomain"
+            || hostname == "local"
+            || hostname.starts_with("broadcasthost")
+        {
+            continue;
+        }
+
+        // Normalize to 0.0.0.0 format and deduplicate
+        if seen.insert(hostname.to_string()) {
+            entries.push(format!("0.0.0.0 {}", hostname));
+        }
     }
-    
-    // Split into parts (IP, hostnames, optional comment)
-    let (content, comment) = if let Some(idx) = clean_line.find('#') {
-        (clean_line[..idx].trim(), Some(clean_line[idx + 1..].trim().to_string()))
-    } else {
-        (clean_line, None)
-    };
-    
-    let parts: Vec<&str> = content.split_whitespace().collect();
-    if parts.is_empty() {
-        return None;
-    }
-    
-    let ip = parts[0].to_string();
-    
-    // Validate IP format (basic check)
-    if !ip.contains('.') && !ip.contains(':') {
-        return None;
-    }
-    
-    let hostnames: Vec<String> = parts[1..].iter().map(|s| s.to_string()).collect();
-    
-    // Skip if no hostnames
-    if hostnames.is_empty() {
-        return None;
-    }
-    
-    Some(HostEntry {
-        line_number,
-        ip,
-        hostnames,
-        comment,
-        is_enabled,
-        raw_line: line.to_string(),
-    })
+
+    entries
 }
 
 // ============================================================================
-// Tauri Commands (All async)
+// Tauri Commands
 // ============================================================================
 
-/// Get all hosts entries
+/// Get available blocklist sources with their status
 #[tauri::command]
-pub async fn get_hosts() -> Result<Vec<HostEntry>> {
-    let entries = tokio::task::spawn_blocking(|| {
-        let content = fs::read_to_string(HOSTS_PATH)?;
-        
-        let entries: Vec<HostEntry> = content
-            .lines()
-            .enumerate()
-            .filter_map(|(idx, line)| parse_host_line(line, idx + 1))
-            .collect();
-        
-        Ok::<_, AppError>(entries)
-    }).await.unwrap()?;
-    
-    Ok(entries)
-}
-
-/// Get hosts file statistics
-#[tauri::command]
-pub async fn get_hosts_stats() -> Result<HostsStats> {
-    let entries = get_hosts().await?;
-    
-    let enabled_entries = entries.iter().filter(|e| e.is_enabled).count();
-    let blocked_domains = entries
-        .iter()
-        .filter(|e| e.is_enabled && (e.ip == "0.0.0.0" || e.ip == "127.0.0.1") && !e.hostnames.contains(&"localhost".to_string()))
-        .map(|e| e.hostnames.len())
-        .sum();
-    
-    Ok(HostsStats {
-        total_entries: entries.len(),
-        enabled_entries,
-        blocked_domains,
+pub async fn get_blocklist_sources() -> Result<Vec<BlocklistSource>> {
+    let content = tokio::task::spawn_blocking(|| {
+        fs::read_to_string(HOSTS_PATH).unwrap_or_default()
     })
-}
+    .await
+    .unwrap();
 
-/// Add a new host entry (async with timeout)
-#[tauri::command]
-pub async fn add_host(ip: String, hostname: String, comment: Option<String>) -> Result<()> {
-    // Validate IP
-    if !ip.contains('.') && !ip.contains(':') {
-        return Err(AppError::System("Invalid IP address".to_string()));
-    }
-    
-    // Validate hostname
-    if hostname.is_empty() || hostname.contains(' ') {
-        return Err(AppError::System("Invalid hostname".to_string()));
-    }
-    
-    let entry = if let Some(c) = comment {
-        format!("{} {} # {}", ip, hostname, c)
-    } else {
-        format!("{} {}", ip, hostname)
-    };
-    
-    let script = format!(
-        "echo '{}' >> '{}'",
-        entry.replace("'", "'\\''"),
-        HOSTS_PATH
-    );
-    privileged::run_privileged_shell(&script).await?;
-    
-    Ok(())
-}
-
-/// Remove a host entry by line number (async with timeout)
-#[tauri::command]
-pub async fn remove_host(line_number: usize) -> Result<()> {
-    let content = fs::read_to_string(HOSTS_PATH)?;
-    let lines: Vec<&str> = content.lines().collect();
-    
-    if line_number < 1 || line_number > lines.len() {
-        return Err(AppError::System("Invalid line number".to_string()));
-    }
-    
-    let new_lines: Vec<&str> = lines
+    let sources: Vec<BlocklistSource> = BLOCKLIST_SOURCES
         .iter()
-        .enumerate()
-        .filter_map(|(idx, line)| {
-            if idx + 1 == line_number {
-                None
-            } else {
-                Some(*line)
+        .map(|(id, name, url, desc)| {
+            // Check if this blocklist is already applied by looking for its marker
+            let marker = format!("# Source: {}", url);
+            let is_enabled = content.contains(&marker);
+
+            BlocklistSource {
+                id: id.to_string(),
+                name: name.to_string(),
+                url: url.to_string(),
+                description: desc.to_string(),
+                domain_count: None, // Will be calculated after download
+                is_enabled,
             }
         })
         .collect();
-    
-    let new_content = new_lines.join("\n") + "\n";
-    
-    let script = format!(
-        "echo '{}' > '{}'",
-        new_content.replace("'", "'\\''"),
-        HOSTS_PATH
-    );
-    privileged::run_privileged_shell(&script).await?;
-    
-    Ok(())
+
+    Ok(sources)
 }
 
-/// Toggle host entry enabled/disabled (async with timeout)
+/// Get current ad-block statistics
 #[tauri::command]
-pub async fn toggle_host(line_number: usize) -> Result<()> {
-    let content = fs::read_to_string(HOSTS_PATH)?;
-    let lines: Vec<&str> = content.lines().collect();
-    
-    if line_number < 1 || line_number > lines.len() {
-        return Err(AppError::System("Invalid line number".to_string()));
-    }
-    
-    let mut new_lines: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
-    let line = &new_lines[line_number - 1];
-    
-    // Toggle comment
-    if line.trim().starts_with('#') {
-        new_lines[line_number - 1] = line.trim_start_matches('#').trim_start().to_string();
-    } else {
-        new_lines[line_number - 1] = format!("# {}", line);
-    }
-    
-    let new_content = new_lines.join("\n") + "\n";
-    
-    let script = format!(
-        "echo '{}' > '{}'",
-        new_content.replace("'", "'\\''"),
-        HOSTS_PATH
-    );
-    privileged::run_privileged_shell(&script).await?;
-    
-    Ok(())
+pub async fn get_adblock_stats() -> Result<AdBlockStats> {
+    let stats = tokio::task::spawn_blocking(|| {
+        let content = fs::read_to_string(HOSTS_PATH).unwrap_or_default();
+        let metadata = fs::metadata(HOSTS_PATH).ok();
+        let file_size = metadata.map(|m| m.len()).unwrap_or(0);
+
+        let mut total_blocked = 0;
+        let mut active_lists = Vec::new();
+        let mut in_blocklist = false;
+
+        for line in content.lines() {
+            if line.trim() == BLOCKLIST_MARKER_START {
+                in_blocklist = true;
+                continue;
+            }
+            if line.trim() == BLOCKLIST_MARKER_END {
+                in_blocklist = false;
+                continue;
+            }
+
+            if in_blocklist {
+                if line.starts_with("# Source: ") {
+                    let url = line.trim_start_matches("# Source: ").trim();
+                    // Find the name for this URL
+                    for (_, name, u, _) in BLOCKLIST_SOURCES {
+                        if *u == url {
+                            active_lists.push(name.to_string());
+                            break;
+                        }
+                    }
+                } else if !line.trim().is_empty() && !line.trim().starts_with('#') {
+                    total_blocked += 1;
+                }
+            }
+        }
+
+        AdBlockStats {
+            total_blocked_domains: total_blocked,
+            active_blocklists: active_lists,
+            hosts_file_size: file_size,
+        }
+    })
+    .await
+    .unwrap();
+
+    Ok(stats)
 }
 
-/// Get available blocklists
+/// Apply selected blocklists
 #[tauri::command]
-pub fn get_blocklists() -> Vec<(String, String)> {
-    BLOCKLISTS
+pub async fn apply_blocklists(source_ids: Vec<String>) -> Result<usize> {
+    if source_ids.is_empty() {
+        return Err(AppError::System("No blocklists selected".to_string()));
+    }
+
+    // Get URLs for selected sources
+    let selected_sources: Vec<(&str, &str, &str)> = BLOCKLIST_SOURCES
         .iter()
-        .map(|(name, url)| (name.to_string(), url.to_string()))
-        .collect()
-}
+        .filter(|(id, _, _, _)| source_ids.contains(&id.to_string()))
+        .map(|(id, name, url, _)| (*id, *name, *url))
+        .collect();
 
-/// Import entries from a blocklist URL (async with progress indication)
-#[tauri::command]
-pub async fn import_blocklist(url: String) -> Result<usize> {
-    // Download blocklist using reqwest
+    if selected_sources.is_empty() {
+        return Err(AppError::System("No valid blocklists found".to_string()));
+    }
+
+    // Download all blocklists
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
+        .timeout(Duration::from_secs(60))
         .build()
         .map_err(|e| AppError::Network(format!("Failed to create HTTP client: {}", e)))?;
-    
-    let response = client.get(&url)
-        .send()
-        .await
-        .map_err(|e| AppError::Network(format!("Failed to download blocklist: {}", e)))?;
-    
-    if !response.status().is_success() {
-        return Err(AppError::Network("Failed to download blocklist".to_string()));
+
+    let mut all_entries: Vec<String> = Vec::new();
+    let mut source_markers: Vec<String> = Vec::new();
+
+    for (_id, name, url) in &selected_sources {
+        let response = client
+            .get(*url)
+            .send()
+            .await
+            .map_err(|e| AppError::Network(format!("Failed to download {}: {}", name, e)))?;
+
+        if !response.status().is_success() {
+            continue; // Skip failed downloads
+        }
+
+        let content = response
+            .text()
+            .await
+            .map_err(|e| AppError::Network(format!("Failed to read {}: {}", name, e)))?;
+
+        let entries = parse_blocklist_entries(&content);
+        source_markers.push(format!("# Source: {} ({} entries)", url, entries.len()));
+        all_entries.extend(entries);
     }
-    
-    let blocklist = response.text()
-        .await
-        .map_err(|e| AppError::Network(format!("Failed to read blocklist: {}", e)))?;
-    
-    // Parse and count valid entries
-    let valid_entries: Vec<String> = blocklist
-        .lines()
-        .filter(|line| {
-            let trimmed = line.trim();
-            !trimmed.is_empty() 
-                && !trimmed.starts_with('#')
-                && (trimmed.starts_with("0.0.0.0") || trimmed.starts_with("127.0.0.1"))
+
+    if all_entries.is_empty() {
+        return Err(AppError::System("No valid entries found in blocklists".to_string()));
+    }
+
+    // Deduplicate entries
+    let mut seen = HashSet::new();
+    let unique_entries: Vec<String> = all_entries
+        .into_iter()
+        .filter(|e| {
+            let hostname = e.split_whitespace().nth(1).unwrap_or("");
+            seen.insert(hostname.to_string())
         })
-        .take(10000) // Limit to prevent huge imports
-        .map(|s| s.to_string())
         .collect();
+
+    let total_count = unique_entries.len();
+
+    // Build the blocklist section
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     
-    let count = valid_entries.len();
-    
-    if count == 0 {
-        return Err(AppError::System("No valid entries found in blocklist".to_string()));
-    }
-    
-    // Append to hosts file
-    let entries_text = valid_entries.join("\n");
-    let marker = format!("\n# --- Imported from {} ---\n", url);
-    
-    let script = format!(
-        "echo '{}{}' >> '{}'",
-        marker.replace("'", "'\\''"),
-        entries_text.replace("'", "'\\''"),
-        HOSTS_PATH
+    let blocklist_section = format!(
+        "{}\n# Applied: {} (unix timestamp)\n# Total blocked: {} domains\n{}\n{}\n{}\n",
+        BLOCKLIST_MARKER_START,
+        timestamp,
+        total_count,
+        source_markers.join("\n"),
+        unique_entries.join("\n"),
+        BLOCKLIST_MARKER_END
     );
+
+    // Get base hosts and append blocklist
+    let base_content = tokio::task::spawn_blocking(get_base_hosts_content)
+        .await
+        .unwrap()?;
+
+    let new_content = format!("{}\n\n{}", base_content.trim(), blocklist_section);
+
+    // Write via temp file
+    let temp_path = tokio::task::spawn_blocking(move || create_temp_file(&new_content))
+        .await
+        .unwrap()?;
+
+    let script = format!(
+        "cat '{}' > '{}' && rm '{}'",
+        temp_path.to_string_lossy(),
+        HOSTS_PATH,
+        temp_path.to_string_lossy()
+    );
+
     privileged::run_privileged_shell(&script).await?;
-    
-    Ok(count)
+
+    Ok(total_count)
 }
 
-/// Backup hosts file (async with timeout)
+/// Clear all blocklists from hosts file
+#[tauri::command]
+pub async fn clear_blocklists() -> Result<()> {
+    let base_content = tokio::task::spawn_blocking(get_base_hosts_content)
+        .await
+        .unwrap()?;
+
+    let new_content = format!("{}\n", base_content.trim());
+
+    let temp_path = tokio::task::spawn_blocking(move || create_temp_file(&new_content))
+        .await
+        .unwrap()?;
+
+    let script = format!(
+        "cat '{}' > '{}' && rm '{}'",
+        temp_path.to_string_lossy(),
+        HOSTS_PATH,
+        temp_path.to_string_lossy()
+    );
+
+    privileged::run_privileged_shell(&script).await?;
+
+    Ok(())
+}
+
+/// Backup hosts file
 #[tauri::command]
 pub async fn backup_hosts() -> Result<String> {
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    
+
     let backup_path = format!("/etc/hosts.backup.{}", timestamp);
-    
+
     privileged::run_privileged("cp", &[HOSTS_PATH, &backup_path]).await?;
-    
+
     Ok(backup_path)
 }
 
@@ -327,21 +430,25 @@ pub async fn list_hosts_backups() -> Result<Vec<String>> {
                 }
             }
         }
+        backups.sort();
+        backups.reverse(); // Newest first
         backups
-    }).await.unwrap();
-    
+    })
+    .await
+    .unwrap();
+
     Ok(backups)
 }
 
-/// Restore hosts from backup (async with timeout)
+/// Restore hosts from backup
 #[tauri::command]
 pub async fn restore_hosts(backup_path: String) -> Result<()> {
     // Validate path
     if !backup_path.starts_with("/etc/hosts.backup.") {
         return Err(AppError::PermissionDenied("Invalid backup path".to_string()));
     }
-    
+
     privileged::run_privileged("cp", &[&backup_path, HOSTS_PATH]).await?;
-    
+
     Ok(())
 }

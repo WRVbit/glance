@@ -1,5 +1,5 @@
 //! Package management module
-//! Lists and uninstalls packages using dpkg/apt (async)
+//! Lists and uninstalls packages with categorization (async)
 
 use crate::error::{AppError, Result};
 use crate::utils::privileged;
@@ -16,7 +16,8 @@ pub struct PackageInfo {
     pub version: String,
     pub size_bytes: u64,
     pub description: String,
-    pub is_auto: bool, // Automatically installed as dependency
+    pub is_auto: bool,
+    pub category: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,6 +26,98 @@ pub struct PackageAction {
     pub action: String,
     pub success: bool,
     pub message: String,
+}
+
+// Category detection patterns
+const GNOME_PACKAGES: &[&str] = &[
+    "gnome", "gtk", "glib", "nautilus", "gedit", "evince", "eog",
+    "totem", "mutter", "gdm", "gvfs", "gio", "gsettings"
+];
+
+const KDE_PACKAGES: &[&str] = &[
+    "kde", "plasma", "qt5", "qt6", "kwin", "dolphin", "konsole",
+    "kate", "okular", "kio", "kf5", "kf6"
+];
+
+const AUDIO_PACKAGES: &[&str] = &[
+    "pulse", "pipewire", "alsa", "jack", "sound", "audio",
+    "spotify", "rhythmbox", "vlc", "mpv", "audacity", "lame", "mp3"
+];
+
+const VIDEO_PACKAGES: &[&str] = &[
+    "video", "ffmpeg", "gstreamer", "x264", "x265", "codec",
+    "obs", "kdenlive", "handbrake", "mpv", "vlc"
+];
+
+const DEV_PACKAGES: &[&str] = &[
+    "gcc", "clang", "llvm", "python", "node", "npm", "cargo", "rust",
+    "golang", "java", "jdk", "jre", "maven", "gradle", "cmake", "make",
+    "git", "mercurial", "subversion", "dev", "devel", "-dbg"
+];
+
+const GAMES_PACKAGES: &[&str] = &[
+    "game", "steam", "wine", "proton", "lutris", "play",
+    "minecraft", "supertux", "frozen"
+];
+
+const OFFICE_PACKAGES: &[&str] = &[
+    "libreoffice", "openoffice", "office", "calc", "writer", "impress",
+    "pdf", "document", "spreadsheet"
+];
+
+const INTERNET_PACKAGES: &[&str] = &[
+    "firefox", "chrome", "chromium", "browser", "thunderbird", "mail",
+    "telegram", "discord", "slack", "zoom", "teams", "skype"
+];
+
+const GRAPHICS_PACKAGES: &[&str] = &[
+    "gimp", "inkscape", "krita", "blender", "image", "photo",
+    "drawing", "paint", "svg", "png", "jpeg"
+];
+
+const FONT_PACKAGES: &[&str] = &[
+    "font", "ttf", "otf", "noto", "dejavu", "liberation", "ubuntu-font"
+];
+
+const LIB_PACKAGES: &[&str] = &[
+    "lib", "libc", "libx", "libgl", "libstdc"
+];
+
+/// Detect package category from name and description
+fn detect_package_category(name: &str, description: &str) -> String {
+    let check = |patterns: &[&str]| {
+        patterns.iter().any(|p| {
+            name.to_lowercase().contains(*p) || description.to_lowercase().contains(*p)
+        })
+    };
+    
+    if check(GNOME_PACKAGES) {
+        "GNOME".to_string()
+    } else if check(KDE_PACKAGES) {
+        "KDE/Qt".to_string()
+    } else if check(AUDIO_PACKAGES) {
+        "Audio".to_string()
+    } else if check(VIDEO_PACKAGES) {
+        "Video".to_string()
+    } else if check(DEV_PACKAGES) {
+        "Development".to_string()
+    } else if check(GAMES_PACKAGES) {
+        "Games".to_string()
+    } else if check(OFFICE_PACKAGES) {
+        "Office".to_string()
+    } else if check(INTERNET_PACKAGES) {
+        "Internet".to_string()
+    } else if check(GRAPHICS_PACKAGES) {
+        "Graphics".to_string()
+    } else if check(FONT_PACKAGES) {
+        "Fonts".to_string()
+    } else if check(LIB_PACKAGES) {
+        "Libraries".to_string()
+    } else if name.ends_with("-doc") || name.ends_with("-docs") {
+        "Documentation".to_string()
+    } else {
+        "System".to_string()
+    }
 }
 
 // ============================================================================
@@ -80,13 +173,17 @@ pub async fn get_packages() -> Result<Vec<PackageInfo>> {
         let version = parts[1].to_string();
         let size_kb: u64 = parts[2].parse().unwrap_or(0);
         let description = parts.get(3).unwrap_or(&"").to_string();
+        
+        // Detect category
+        let category = detect_package_category(&name, &description);
 
         packages.push(PackageInfo {
             name: name.clone(),
             version,
-            size_bytes: size_kb * 1024, // Convert KB to bytes
+            size_bytes: size_kb * 1024,
             description,
             is_auto: auto_packages.contains(&name),
+            category,
         });
     }
 

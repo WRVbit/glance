@@ -14,6 +14,8 @@ export interface ServiceInfo {
     is_enabled: boolean;
     can_stop: boolean;
     can_restart: boolean;
+    category: string;
+    memory_mb: number | null;
 }
 
 export interface ServiceAction {
