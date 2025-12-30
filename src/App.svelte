@@ -1086,6 +1086,349 @@
             </div>
           {/if}
         </div>
+      {:else if currentPage === "repositories"}
+        <!-- Repositories -->
+        <div class="space-y-6">
+          <div class="card">
+            <h3 class="font-semibold mb-4">Manage Repositories</h3>
+
+            <!-- PPA Input -->
+            <div class="flex gap-4 mb-6">
+              <input
+                type="text"
+                class="input flex-1"
+                placeholder="Add PPA (e.g. ppa:user/repo)..."
+                bind:value={newPpa}
+              />
+              <button class="btn btn-primary" onclick={handleAddPpa}
+                >Add PPA</button
+              >
+            </div>
+
+            <!-- Mirrors -->
+            <div class="border-t border-white/10 pt-6">
+              <div class="flex items-center justify-between mb-4">
+                <h4 class="font-medium">Ubuntu Mirrors</h4>
+                <button
+                  class="btn btn-secondary btn-sm"
+                  disabled={testingMirrors}
+                  onclick={handleTestMirrors}
+                >
+                  {#if testingMirrors}
+                    <span class="spinner w-4 h-4 mr-2"></span> Testing...
+                  {:else}
+                    Test Speeds
+                  {/if}
+                </button>
+              </div>
+
+              <div
+                class="bg-surface-800 rounded-lg p-2 max-h-40 overflow-y-auto"
+              >
+                {#each mirrors as mirror}
+                  <div
+                    class="flex items-center justify-between p-2 hover:bg-surface-700 rounded cursor-pointer"
+                    onclick={() => handleSetMirror(mirror.uri)}
+                  >
+                    <div class="flex flex-col">
+                      <span class="text-sm font-medium"
+                        >{mirror.name} ({mirror.country})</span
+                      >
+                      <span class="text-xs text-gray-500 truncate"
+                        >{mirror.uri}</span
+                      >
+                    </div>
+                    <div class="flex items-center gap-2">
+                      {#if mirror.latency_ms !== null}
+                        <span
+                          class="text-xs font-mono {mirror.latency_ms < 100
+                            ? 'text-green-400'
+                            : 'text-yellow-400'}"
+                        >
+                          {mirror.latency_ms}ms
+                        </span>
+                      {/if}
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            </div>
+          </div>
+
+          <!-- Repo List -->
+          {#if loadingRepos}
+            <div class="flex justify-center py-8">
+              <div class="spinner w-8 h-8"></div>
+            </div>
+          {:else}
+            <div class="space-y-2">
+              {#each repositories as repo}
+                <div class="list-item">
+                  <div class="flex-1">
+                    <div class="flex items-center gap-2">
+                      <span class="font-medium">{repo.repo_type}</span>
+                      {#if repo.is_ppa}
+                        <span class="badge badge-accent">PPA</span>
+                      {/if}
+                      <span class="text-sm text-gray-400">{repo.suite}</span>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-1 truncate">
+                      {repo.uri}
+                    </p>
+                    <p class="text-xs text-gray-600 truncate">
+                      {repo.components.join(" ")}
+                    </p>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <button
+                      class="toggle"
+                      class:bg-primary-600={repo.is_enabled}
+                      class:bg-surface-700={!repo.is_enabled}
+                      onclick={() =>
+                        invoke("toggle_repository", {
+                          filePath: repo.file_path,
+                          lineNumber: repo.line_number,
+                        }).then(loadRepositories)}
+                    >
+                      <span
+                        class="toggle-dot"
+                        class:translate-x-5={repo.is_enabled}
+                        class:translate-x-1={!repo.is_enabled}
+                      ></span>
+                    </button>
+                    {#if repo.is_ppa}
+                      <button
+                        class="btn btn-danger btn-sm"
+                        onclick={() =>
+                          reposService
+                            .removePpa(repo.uri)
+                            .then(loadRepositories)}
+                      >
+                        ✕
+                      </button>
+                    {/if}
+                  </div>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </div>
+      {:else if currentPage === "resources"}
+        <!-- Resources -->
+        <div class="space-y-6">
+          <!-- CPU Chart -->
+          <div class="card">
+            <h3 class="font-semibold mb-4 flex items-center gap-2">
+              <span class="text-xl">⚡</span> CPU History
+            </h3>
+            <div
+              class="relative h-48 bg-surface-900/50 rounded-lg overflow-hidden flex items-end"
+            >
+              <!-- Grid lines -->
+              <div
+                class="absolute inset-x-0 bottom-0 h-full border-b border-surface-700"
+              ></div>
+              <div
+                class="absolute inset-x-0 bottom-1/2 h-px bg-surface-700/50 dashed"
+              ></div>
+
+              <!-- Chart -->
+              <svg
+                class="w-full h-full"
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+              >
+                <polyline
+                  vector-effect="non-scaling-stroke"
+                  points={resourceHistory.snapshots
+                    .map(
+                      (s, i) =>
+                        `${(i / Math.max(1, resourceHistory.snapshots.length - 1)) * 100},${100 - s.cpu_percent}`,
+                    )
+                    .join(" ")}
+                  fill="none"
+                  stroke="currentColor"
+                  class="text-primary-500"
+                  stroke-width="2"
+                />
+              </svg>
+              <!-- Gradient fill under line (simulated) -->
+              <div
+                class="absolute inset-0 bg-gradient-to-t from-primary-500/20 to-transparent pointer-events-none"
+              ></div>
+            </div>
+            <div class="flex justify-between mt-2 text-xs text-gray-500">
+              <span>60s ago</span>
+              <span>Now</span>
+            </div>
+          </div>
+
+          <!-- Network Chart -->
+          <div class="card">
+            <h3 class="font-semibold mb-4 flex items-center gap-2">
+              <span class="text-xl">🌐</span> Network Traffic
+            </h3>
+            <div
+              class="relative h-48 bg-surface-900/50 rounded-lg overflow-hidden"
+            >
+              <svg
+                class="w-full h-full"
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+              >
+                <!-- Download (Green) -->
+                <polyline
+                  vector-effect="non-scaling-stroke"
+                  points={resourceHistory.net_rx_speed
+                    .map((s, i) => {
+                      const max = Math.max(
+                        ...resourceHistory.net_rx_speed,
+                        1024,
+                      ); // Min 1KB scale
+                      return `${(i / Math.max(1, resourceHistory.net_rx_speed.length - 1)) * 100},${100 - (s / max) * 90}`;
+                    })
+                    .join(" ")}
+                  fill="none"
+                  stroke="#10b981"
+                  stroke-width="2"
+                />
+                <!-- Upload (Blue) -->
+                <polyline
+                  vector-effect="non-scaling-stroke"
+                  points={resourceHistory.net_tx_speed
+                    .map((s, i) => {
+                      const max = Math.max(
+                        ...resourceHistory.net_tx_speed,
+                        1024,
+                      );
+                      return `${(i / Math.max(1, resourceHistory.net_tx_speed.length - 1)) * 100},${100 - (s / max) * 90}`;
+                    })
+                    .join(" ")}
+                  fill="none"
+                  stroke="#3b82f6"
+                  stroke-width="2"
+                />
+              </svg>
+
+              <div
+                class="absolute top-2 right-2 text-xs text-right bg-surface-900/80 p-2 rounded"
+              >
+                <p class="text-emerald-400">
+                  ⬇ {formatBytes(
+                    resourceHistory.net_rx_speed[
+                      resourceHistory.net_rx_speed.length - 1
+                    ] || 0,
+                  )}/s
+                </p>
+                <p class="text-blue-400">
+                  ⬆ {formatBytes(
+                    resourceHistory.net_tx_speed[
+                      resourceHistory.net_tx_speed.length - 1
+                    ] || 0,
+                  )}/s
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      {:else if currentPage === "hosts"}
+        <!-- Hosts Editor -->
+        <div class="space-y-6">
+          <div class="grid grid-cols-3 gap-4">
+            <div class="stat-card">
+              <p class="stat-value">{hostsStats.total_entries}</p>
+              <p class="stat-label">Total Entries</p>
+            </div>
+            <div class="stat-card">
+              <p class="stat-value">{hostsStats.enabled_entries}</p>
+              <p class="stat-label">Enabled</p>
+            </div>
+            <div class="stat-card">
+              <p class="stat-value">{hostsStats.blocked_domains}</p>
+              <p class="stat-label">Blocked Domains</p>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3 class="font-semibold mb-4">Add Entry</h3>
+            <div class="flex gap-4">
+              <input
+                type="text"
+                class="input w-32"
+                placeholder="IP Address"
+                bind:value={newHostIp}
+              />
+              <input
+                type="text"
+                class="input flex-1"
+                placeholder="Hostname (e.g. facebook.com)"
+                bind:value={newHostname}
+              />
+              <button class="btn btn-primary" onclick={handleAddHost}
+                >Add</button
+              >
+            </div>
+          </div>
+
+          <div class="card">
+            <h3 class="font-semibold mb-4">Import Blocklist</h3>
+            <div class="flex flex-wrap gap-2">
+              {#each blocklists as [name, url]}
+                <button
+                  class="btn btn-secondary btn-sm"
+                  onclick={() => handleImportBlocklist(url)}
+                >
+                  + {name}
+                </button>
+              {/each}
+            </div>
+          </div>
+
+          {#if loadingHosts}
+            <div class="flex justify-center py-8">
+              <div class="spinner w-8 h-8"></div>
+            </div>
+          {:else}
+            <div class="bg-surface-800 rounded-xl overflow-hidden">
+              <table class="w-full text-sm text-left">
+                <thead class="bg-surface-700 text-gray-400">
+                  <tr>
+                    <th class="p-4">IP</th>
+                    <th class="p-4">Hostnames</th>
+                    <th class="p-4">Action</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-white/5">
+                  {#each hostEntries as entry}
+                    <tr
+                      class="hover:bg-white/5 {entry.is_enabled
+                        ? ''
+                        : 'opacity-50'}"
+                    >
+                      <td class="p-4 font-mono">{entry.ip}</td>
+                      <td class="p-4">{entry.hostnames.join(" ")}</td>
+                      <td class="p-4 flex gap-2">
+                        <button
+                          class="btn btn-sm"
+                          class:btn-secondary={entry.is_enabled}
+                          onclick={() => handleToggleHost(entry.line_number)}
+                        >
+                          {entry.is_enabled ? "Disable" : "Enable"}
+                        </button>
+                        <button
+                          class="btn btn-danger btn-sm"
+                          onclick={() => handleRemoveHost(entry.line_number)}
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+          {/if}
+        </div>
       {/if}
     </div>
   </main>
