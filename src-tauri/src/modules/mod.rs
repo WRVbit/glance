@@ -2,6 +2,7 @@
 
 pub mod cleaner;
 pub mod dns;
+pub mod gaming;
 pub mod hosts;
 pub mod packages;
 pub mod processes;
@@ -11,4 +12,5 @@ pub mod services;
 pub mod startup;
 pub mod system_stats;
 pub mod tweaks;
+
 

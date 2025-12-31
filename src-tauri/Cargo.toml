@@ -1,6 +1,6 @@
 [package]
 name = "glance-linuxoptimizer"
-version = "0.1.0"
+version = "26.1.1"
 description = "A next-generation Linux system utility for monitoring, cleaning, and optimization. See Everything. Optimize Anything."
 authors = ["WRVbit"]
 license = "GPL-3.0"

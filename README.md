@@ -156,6 +156,41 @@ Configure system DNS settings.
 - Custom DNS configuration
 - Clear DNS cache
 
+### 🎮 Gaming Center
+**One-Touch Linux Gaming Setup** - inspired by Nobara Project & AdelKS Linux Gaming Guide.
+
+| Layer | What It Does |
+|-------|--------------|
+| **Layer 1** | Enable 32-bit (i386) + GPU Drivers (NVIDIA/AMD/Intel) |
+| **Layer 2** | Vulkan loader + Wine + GameMode |
+| **Layer 3** | Kernel Tweaks (vm.max_map_count, swappiness, ESYNC) |
+| **Layer 4** | Steam + MangoHud + ProtonUp-Qt + Heroic |
+
+#### ⚡ One-Touch Setup
+Click one button to install everything needed for gaming on Linux:
+- **System Profile Detection** - Auto-detects tier (Low/Medium/High) based on RAM, CPU, GPU
+- **Gaming Checklist** - 6-point readiness check (32-bit, Vulkan, Drivers, Tweaks, Limits, GameMode)
+- **One-Click Install** - Installs all 4 layers automatically
+
+#### 📦 Essentials & Launchers
+| App | Description |
+|-----|-------------|
+| 🎮 Steam | Valve's gaming platform |
+| ⚔️ Heroic | Epic Games & GOG launcher |
+| 🍷 Lutris | Run Windows games easily |
+| 🔧 ProtonUp-Qt | Download GE-Proton |
+| 📊 MangoHud | FPS overlay |
+| ⚡ GameMode | Auto CPU boost |
+
+#### 🚀 Performance Tweaks
+| Tweak | Recommended | Description |
+|-------|-------------|-------------|
+| vm.max_map_count | 2147483642 | Prevents crashes in heavy games |
+| vm.swappiness | 10 | Keep games in RAM |
+| ESYNC/FSYNC | 1048576 | High file descriptor limit |
+| Mouse Acceleration | Disabled | 1:1 raw input for FPS games |
+
+
 ---
 
 ## 📸 Screenshots

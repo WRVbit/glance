@@ -8,7 +8,7 @@ mod modules;
 mod state;
 mod utils;
 
-use modules::{cleaner, dns, hosts, packages, processes, repositories, resources, services, startup, system_stats, tweaks};
+use modules::{cleaner, dns, gaming, hosts, packages, processes, repositories, resources, services, startup, system_stats, tweaks};
 use state::AppState;
 use utils::distro::DistroInfo;
 use utils::{DistroFamily, DesktopEnvironment};
@@ -140,6 +140,19 @@ pub fn run() {
             dns::set_dns_provider,
             dns::set_custom_dns,
             dns::reset_dns,
+            // Gaming Center
+            gaming::get_gaming_status,
+            gaming::get_gaming_packages,
+            gaming::get_gaming_tweaks,
+            gaming::install_gaming_package,
+            gaming::enable_multilib,
+            gaming::install_vulkan_support,
+            gaming::apply_gaming_tweak,
+            gaming::apply_all_gaming_tweaks,
+            gaming::reset_gaming_tweaks,
+            gaming::get_system_profile,
+            gaming::get_gaming_checklist,
+            gaming::one_touch_gaming_setup,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

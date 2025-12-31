@@ -16,7 +16,7 @@
   // State (Svelte 5 Runes)
   // ============================================================================
 
-  /** @type {'dashboard' | 'cleaner' | 'tweaks' | 'services' | 'startup' | 'packages' | 'processes' | 'repositories' | 'resources' | 'hosts' | 'about'} */
+  /** @type {'dashboard' | 'cleaner' | 'tweaks' | 'services' | 'startup' | 'packages' | 'processes' | 'repositories' | 'resources' | 'hosts' | 'gaming' | 'about'} */
   let currentPage = $state("dashboard");
   let loading = $state(true);
 
@@ -126,6 +126,19 @@
   let customDnsSecondary = $state("");
   let applyingDns = $state(false);
 
+  // Gaming Center
+  let gamingStatus = $state(null);
+  let gamingPackages = $state([]);
+  let gamingTweaks = $state([]);
+  let gamingTab = $state("essentials"); // essentials, drivers, tweaks, onetouch
+  let loadingGaming = $state(false);
+  let installingPackage = $state(null);
+  let applyingGamingTweak = $state(null);
+  let systemProfile = $state(null);
+  let gamingChecklist = $state(null);
+  let runningOneTouch = $state(false);
+  let oneTouchLogs = $state([]);
+
   // Refresh interval
   let refreshInterval = $state(null);
 
@@ -133,7 +146,7 @@
   // Navigation
   // ============================================================================
 
-  /** @type {{id: 'dashboard' | 'cleaner' | 'tweaks' | 'services' | 'startup' | 'packages' | 'processes' | 'repositories' | 'resources' | 'hosts' , icon: string, label: string}[]} */
+  /** @type {{id: 'dashboard' | 'cleaner' | 'tweaks' | 'services' | 'startup' | 'packages' | 'processes' | 'repositories' | 'resources' | 'hosts' | 'gaming' , icon: string, label: string}[]} */
   const navItems = [
     // Overview
     { id: "dashboard", icon: "⬢", label: "Dashboard" },
@@ -149,6 +162,8 @@
     { id: "startup", icon: "►", label: "Startup Apps" },
     // Network & Security
     { id: "hosts", icon: "⛊", label: "Ad-Block & DNS" },
+    // Gaming
+    { id: "gaming", icon: "🎮", label: "Gaming Center" },
   ];
 
   // ============================================================================
@@ -409,6 +424,93 @@
     await Promise.all([loadAdblock(), loadDns()]);
   }
 
+  async function loadGaming() {
+    loadingGaming = true;
+    try {
+      [
+        gamingStatus,
+        gamingPackages,
+        gamingTweaks,
+        systemProfile,
+        gamingChecklist,
+      ] = await Promise.all([
+        invoke("get_gaming_status"),
+        invoke("get_gaming_packages"),
+        invoke("get_gaming_tweaks"),
+        invoke("get_system_profile"),
+        invoke("get_gaming_checklist"),
+      ]);
+    } catch (e) {
+      console.error("Failed to load gaming:", e);
+    }
+    loadingGaming = false;
+  }
+
+  async function handleOneTouchSetup() {
+    runningOneTouch = true;
+    oneTouchLogs = [];
+    try {
+      const logs = await invoke("one_touch_gaming_setup");
+      oneTouchLogs = logs;
+      await loadGaming(); // Refresh status
+    } catch (e) {
+      console.error("One-touch setup failed:", e);
+      oneTouchLogs = ["❌ Error: " + e];
+    }
+    runningOneTouch = false;
+  }
+
+  async function handleInstallGamingPackage(pkgId) {
+    installingPackage = pkgId;
+    try {
+      await invoke("install_gaming_package", { pkgId });
+      await loadGaming();
+    } catch (e) {
+      console.error("Failed to install package:", e);
+    }
+    installingPackage = null;
+  }
+
+  async function handleApplyGamingTweak(tweakId, value) {
+    applyingGamingTweak = tweakId;
+    try {
+      await invoke("apply_gaming_tweak", { tweakId, value });
+      await loadGaming();
+    } catch (e) {
+      console.error("Failed to apply tweak:", e);
+    }
+    applyingGamingTweak = null;
+  }
+
+  async function handleApplyAllGamingTweaks() {
+    applyingGamingTweak = "all";
+    try {
+      await invoke("apply_all_gaming_tweaks");
+      await loadGaming();
+    } catch (e) {
+      console.error("Failed to apply all tweaks:", e);
+    }
+    applyingGamingTweak = null;
+  }
+
+  async function handleEnableMultilib() {
+    try {
+      await invoke("enable_multilib");
+      await loadGaming();
+    } catch (e) {
+      console.error("Failed to enable multilib:", e);
+    }
+  }
+
+  async function handleInstallVulkan() {
+    try {
+      await invoke("install_vulkan_support");
+      await loadGaming();
+    } catch (e) {
+      console.error("Failed to install Vulkan:", e);
+    }
+  }
+
   // ============================================================================
   // Actions
   // ============================================================================
@@ -605,6 +707,7 @@
     else if (currentPage === "startup") loadStartup();
     else if (currentPage === "repositories") loadRepositories();
     else if (currentPage === "hosts") loadHosts();
+    else if (currentPage === "gaming") loadGaming();
     else if (currentPage === "resources") {
       loadResources();
       // Start resource polling with local intervalId
@@ -690,7 +793,7 @@
       <img src={logoImage} alt="Glance Logo" class="w-10 h-10 rounded-xl" />
       <div>
         <h1 class="font-bold text-lg text-gradient">Glance</h1>
-        <p class="text-xs text-gray-500">v0.1.0</p>
+        <p class="text-xs text-gray-500">v26.1.1</p>
       </div>
     </div>
 
@@ -2415,6 +2518,594 @@
             </div>
           </div>
         </div>
+      {:else if currentPage === "gaming"}
+        <!-- Gaming Center -->
+        <div class="space-y-6">
+          <!-- Gaming Status Header -->
+          {#if loadingGaming}
+            <div class="flex items-center justify-center p-8">
+              <div class="spinner w-8 h-8"></div>
+            </div>
+          {:else}
+            {#if gamingStatus}
+              <div class="card">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-4">
+                    <div class="text-4xl">🎮</div>
+                    <div>
+                      <h3 class="text-lg font-semibold">
+                        {gamingStatus.gpu?.model
+                          ?.split("[")
+                          .pop()
+                          ?.replace("]", "") ||
+                          gamingStatus.gpu?.model ||
+                          "GPU Not Detected"}
+                      </h3>
+                      <p class="text-gray-400 text-sm">
+                        {gamingStatus.gpu?.vendor?.toUpperCase() || "Unknown"} •
+                        Driver: {gamingStatus.gpu?.driver || "N/A"}
+                        {gamingStatus.gpu?.driver_version
+                          ? `v${gamingStatus.gpu.driver_version}`
+                          : ""} • Vulkan: {gamingStatus.gpu?.vulkan_ready
+                          ? "✓ Ready"
+                          : "✗ Not Ready"}
+                      </p>
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-3">
+                    <span class="text-sm text-gray-500">Gaming Score:</span>
+                    <span
+                      class="px-4 py-2 rounded-lg font-semibold {gamingStatus.score_color ===
+                      'green'
+                        ? 'bg-green-500/20 text-green-400'
+                        : gamingStatus.score_color === 'yellow'
+                          ? 'bg-yellow-500/20 text-yellow-400'
+                          : 'bg-red-500/20 text-red-400'}"
+                    >
+                      {gamingStatus.gaming_score}
+                    </span>
+                  </div>
+                </div>
+
+                <!-- Issues -->
+                {#if gamingStatus.issues?.length > 0}
+                  <div class="mt-4 pt-4 border-t border-surface-700">
+                    <p class="text-sm text-gray-400 mb-2">Issues to Fix:</p>
+                    <div class="space-y-1">
+                      {#each gamingStatus.issues as issue}
+                        <p class="text-sm text-yellow-400">⚠ {issue}</p>
+                      {/each}
+                    </div>
+                  </div>
+                {/if}
+              </div>
+            {/if}
+
+            <!-- Tab Navigation -->
+            <div class="flex gap-2 bg-surface-800 p-1 rounded-lg w-fit">
+              <button
+                class="px-4 py-2 rounded-md text-sm font-medium transition-all {gamingTab ===
+                'essentials'
+                  ? 'bg-primary-500 text-white'
+                  : 'text-gray-400 hover:text-white'}"
+                onclick={() => (gamingTab = "essentials")}
+              >
+                📦 Essentials & Launchers
+              </button>
+              <button
+                class="px-4 py-2 rounded-md text-sm font-medium transition-all {gamingTab ===
+                'drivers'
+                  ? 'bg-primary-500 text-white'
+                  : 'text-gray-400 hover:text-white'}"
+                onclick={() => (gamingTab = "drivers")}
+              >
+                💻 Drivers & System
+              </button>
+              <button
+                class="px-4 py-2 rounded-md text-sm font-medium transition-all {gamingTab ===
+                'tweaks'
+                  ? 'bg-primary-500 text-white'
+                  : 'text-gray-400 hover:text-white'}"
+                onclick={() => (gamingTab = "tweaks")}
+              >
+                🚀 Performance Tweaks
+              </button>
+              <button
+                class="px-4 py-2 rounded-md text-sm font-medium transition-all {gamingTab ===
+                'onetouch'
+                  ? 'bg-green-500 text-white'
+                  : 'text-gray-400 hover:text-white'}"
+                onclick={() => (gamingTab = "onetouch")}
+              >
+                ⚡ One-Touch Setup
+              </button>
+            </div>
+
+            <!-- Tab 1: Essentials & Launchers -->
+            {#if gamingTab === "essentials"}
+              <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {#each gamingPackages.filter((p) => p.category === "platform" || p.category === "compatibility" || p.category === "tools") as pkg}
+                  <div class="card card-hover">
+                    <div class="flex items-start gap-3">
+                      <span class="text-2xl">{pkg.icon}</span>
+                      <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-2">
+                          <h4 class="font-semibold truncate">{pkg.name}</h4>
+                          {#if pkg.recommended}
+                            <span
+                              class="px-2 py-0.5 text-xs bg-primary-500/20 text-primary-400 rounded"
+                              >Recommended</span
+                            >
+                          {/if}
+                        </div>
+                        <p class="text-sm text-gray-400 mt-1 line-clamp-2">
+                          {pkg.description}
+                        </p>
+                        <div class="flex items-center justify-between mt-3">
+                          <span
+                            class="text-xs {pkg.installed
+                              ? 'text-green-400'
+                              : 'text-gray-500'}"
+                          >
+                            {pkg.installed ? "✓ Installed" : "Not Installed"}
+                          </span>
+                          {#if !pkg.installed}
+                            <button
+                              class="btn btn-sm btn-primary"
+                              disabled={installingPackage === pkg.id}
+                              onclick={() => handleInstallGamingPackage(pkg.id)}
+                            >
+                              {installingPackage === pkg.id
+                                ? "Installing..."
+                                : "Install"}
+                            </button>
+                          {:else}
+                            <span class="text-xs text-gray-600"
+                              >via {pkg.install_method}</span
+                            >
+                          {/if}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                {/each}
+              </div>
+
+              <!-- Streaming Tools -->
+              <h3 class="text-lg font-semibold mt-6 mb-4">
+                📺 Streaming & Recording
+              </h3>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {#each gamingPackages.filter((p) => p.category === "streaming") as pkg}
+                  <div class="card card-hover">
+                    <div class="flex items-start gap-3">
+                      <span class="text-2xl">{pkg.icon}</span>
+                      <div class="flex-1">
+                        <h4 class="font-semibold">{pkg.name}</h4>
+                        <p class="text-sm text-gray-400 mt-1">
+                          {pkg.description}
+                        </p>
+                        <div class="flex items-center justify-between mt-3">
+                          <span
+                            class="text-xs {pkg.installed
+                              ? 'text-green-400'
+                              : 'text-gray-500'}"
+                          >
+                            {pkg.installed ? "✓ Installed" : "Not Installed"}
+                          </span>
+                          {#if !pkg.installed}
+                            <button
+                              class="btn btn-sm btn-primary"
+                              disabled={installingPackage === pkg.id}
+                              onclick={() => handleInstallGamingPackage(pkg.id)}
+                            >
+                              {installingPackage === pkg.id
+                                ? "Installing..."
+                                : "Install"}
+                            </button>
+                          {/if}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+
+            <!-- Tab 2: Drivers & System -->
+            {#if gamingTab === "drivers"}
+              <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- GPU Driver Status -->
+                <div class="card">
+                  <h3 class="section-title flex items-center gap-2">
+                    {#if gamingStatus?.gpu?.vendor === "nvidia"}🟢
+                    {:else if gamingStatus?.gpu?.vendor === "amd"}🔴
+                    {:else}🔵{/if}
+                    GPU Driver
+                  </h3>
+                  <div class="space-y-3">
+                    <div
+                      class="flex justify-between p-3 bg-surface-800 rounded-lg"
+                    >
+                      <span class="text-gray-400">Vendor</span>
+                      <span class="font-medium"
+                        >{gamingStatus?.gpu?.vendor?.toUpperCase() ||
+                          "Unknown"}</span
+                      >
+                    </div>
+                    <div
+                      class="flex justify-between p-3 bg-surface-800 rounded-lg"
+                    >
+                      <span class="text-gray-400">Current Driver</span>
+                      <span class="font-medium"
+                        >{gamingStatus?.gpu?.driver || "Not detected"}</span
+                      >
+                    </div>
+                    <div
+                      class="flex justify-between p-3 bg-surface-800 rounded-lg"
+                    >
+                      <span class="text-gray-400">Driver Version</span>
+                      <span class="font-medium"
+                        >{gamingStatus?.gpu?.driver_version || "N/A"}</span
+                      >
+                    </div>
+                    <div
+                      class="flex justify-between p-3 bg-surface-800 rounded-lg"
+                    >
+                      <span class="text-gray-400">Vulkan Support</span>
+                      <span
+                        class="font-medium {gamingStatus?.gpu?.vulkan_ready
+                          ? 'text-green-400'
+                          : 'text-red-400'}"
+                      >
+                        {gamingStatus?.gpu?.vulkan_ready
+                          ? "✓ Ready"
+                          : "✗ Not Ready"}
+                      </span>
+                    </div>
+                  </div>
+                  {#if !gamingStatus?.gpu?.vulkan_ready}
+                    <button
+                      class="btn btn-primary w-full mt-4"
+                      onclick={handleInstallVulkan}
+                    >
+                      Install Vulkan Support
+                    </button>
+                  {/if}
+                </div>
+
+                <!-- 32-bit Support -->
+                <div class="card">
+                  <h3 class="section-title">🔧 32-bit Support (Multilib)</h3>
+                  <p class="text-sm text-gray-400 mb-4">
+                    Steam and many games need 32-bit libraries. This is
+                    essential for gaming on Linux.
+                  </p>
+                  <div
+                    class="flex justify-between p-3 bg-surface-800 rounded-lg"
+                  >
+                    <span class="text-gray-400">32-bit Libraries</span>
+                    <span
+                      class="font-medium {gamingStatus?.multilib_enabled
+                        ? 'text-green-400'
+                        : 'text-red-400'}"
+                    >
+                      {gamingStatus?.multilib_enabled
+                        ? "✓ Enabled"
+                        : "✗ Not Enabled"}
+                    </span>
+                  </div>
+                  {#if !gamingStatus?.multilib_enabled}
+                    <button
+                      class="btn btn-primary w-full mt-4"
+                      onclick={handleEnableMultilib}
+                    >
+                      Enable 32-bit Support
+                    </button>
+                  {/if}
+                </div>
+              </div>
+            {/if}
+
+            <!-- Tab 3: Performance Tweaks -->
+            {#if gamingTab === "tweaks"}
+              <div class="card mb-4">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <h3 class="text-lg font-semibold">
+                      Apply All Recommended Tweaks
+                    </h3>
+                    <p class="text-sm text-gray-400">
+                      One-click optimization from Nobara Project & AdelKS Guide
+                    </p>
+                  </div>
+                  <button
+                    class="btn btn-primary btn-lg"
+                    disabled={applyingGamingTweak === "all"}
+                    onclick={handleApplyAllGamingTweaks}
+                  >
+                    {applyingGamingTweak === "all"
+                      ? "Applying..."
+                      : "⚡ Optimize All"}
+                  </button>
+                </div>
+              </div>
+
+              <div class="space-y-4">
+                {#each gamingTweaks as tweak}
+                  <div class="card">
+                    <div class="flex items-start justify-between">
+                      <div class="flex-1">
+                        <div class="flex items-center gap-2">
+                          <h4 class="font-semibold">{tweak.name}</h4>
+                          {#if tweak.risk_level === "safe"}
+                            <span
+                              class="px-2 py-0.5 text-xs bg-green-500/20 text-green-400 rounded"
+                              >Safe</span
+                            >
+                          {:else if tweak.risk_level === "moderate"}
+                            <span
+                              class="px-2 py-0.5 text-xs bg-yellow-500/20 text-yellow-400 rounded"
+                              >Moderate</span
+                            >
+                          {:else}
+                            <span
+                              class="px-2 py-0.5 text-xs bg-red-500/20 text-red-400 rounded"
+                              >Advanced</span
+                            >
+                          {/if}
+                          {#if tweak.requires_reboot}
+                            <span
+                              class="px-2 py-0.5 text-xs bg-purple-500/20 text-purple-400 rounded"
+                              >Needs Reboot</span
+                            >
+                          {/if}
+                        </div>
+                        <p class="text-sm text-gray-400 mt-1">
+                          {tweak.description}
+                        </p>
+
+                        <div class="mt-3 flex items-center gap-4">
+                          <div class="flex items-center gap-2">
+                            <span class="text-xs text-gray-500">Current:</span>
+                            <span
+                              class="font-mono text-sm {tweak.is_optimal
+                                ? 'text-green-400'
+                                : 'text-yellow-400'}"
+                            >
+                              {tweak.current_value}
+                            </span>
+                          </div>
+                          <div class="flex items-center gap-2">
+                            <span class="text-xs text-gray-500"
+                              >Recommended:</span
+                            >
+                            <span class="font-mono text-sm text-primary-400"
+                              >{tweak.recommended_value}</span
+                            >
+                          </div>
+                        </div>
+
+                        <!-- Slider for numeric tweaks -->
+                        {#if tweak.value_type === "slider" && tweak.id !== "vm.max_map_count"}
+                          <div class="mt-3">
+                            <input
+                              type="range"
+                              class="w-full accent-primary-500"
+                              min={tweak.min_value}
+                              max={tweak.max_value}
+                              value={tweak.current_value}
+                              onchange={(e) =>
+                                handleApplyGamingTweak(
+                                  tweak.id,
+                                  e.currentTarget.value,
+                                )}
+                            />
+                          </div>
+                        {/if}
+                      </div>
+
+                      <div class="flex items-center gap-2 ml-4">
+                        {#if tweak.is_optimal}
+                          <span class="text-green-400 text-sm">✓ Optimal</span>
+                        {:else}
+                          <button
+                            class="btn btn-sm btn-primary"
+                            disabled={applyingGamingTweak === tweak.id}
+                            onclick={() =>
+                              handleApplyGamingTweak(
+                                tweak.id,
+                                tweak.recommended_value,
+                              )}
+                          >
+                            {applyingGamingTweak === tweak.id
+                              ? "Applying..."
+                              : "Apply"}
+                          </button>
+                        {/if}
+                      </div>
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+
+            <!-- Tab 4: One-Touch Setup -->
+            {#if gamingTab === "onetouch"}
+              <div class="space-y-6">
+                <!-- System Profile -->
+                {#if systemProfile}
+                  <div
+                    class="card bg-gradient-to-r from-primary-500/10 to-accent-500/10"
+                  >
+                    <div class="flex items-center gap-4">
+                      <div class="text-5xl">
+                        {#if systemProfile.tier === "high"}🚀
+                        {:else if systemProfile.tier === "medium"}💪
+                        {:else}🎮{/if}
+                      </div>
+                      <div>
+                        <h3 class="text-xl font-bold">
+                          {systemProfile.description}
+                        </h3>
+                        <p class="text-sm text-gray-400 mt-1">
+                          Tier: <span class="font-semibold text-primary-400"
+                            >{systemProfile.tier.toUpperCase()}</span
+                          >
+                          • RAM: {systemProfile.ram_gb}GB • CPU: {systemProfile.cpu_cores}
+                          cores • GPU: {systemProfile.gpu_vendor?.toUpperCase()}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                {/if}
+
+                <!-- Gaming Checklist -->
+                <div class="card">
+                  <h3 class="section-title mb-4">
+                    📋 Gaming Readiness Checklist
+                  </h3>
+                  {#if gamingChecklist}
+                    <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+                      <div
+                        class="flex items-center gap-2 p-3 rounded-lg {gamingChecklist.multilib_ok
+                          ? 'bg-green-500/10'
+                          : 'bg-red-500/10'}"
+                      >
+                        <span class="text-xl"
+                          >{gamingChecklist.multilib_ok ? "✓" : "✗"}</span
+                        >
+                        <span class="text-sm">32-bit Support</span>
+                      </div>
+                      <div
+                        class="flex items-center gap-2 p-3 rounded-lg {gamingChecklist.vulkan_ok
+                          ? 'bg-green-500/10'
+                          : 'bg-red-500/10'}"
+                      >
+                        <span class="text-xl"
+                          >{gamingChecklist.vulkan_ok ? "✓" : "✗"}</span
+                        >
+                        <span class="text-sm">Vulkan</span>
+                      </div>
+                      <div
+                        class="flex items-center gap-2 p-3 rounded-lg {gamingChecklist.drivers_ok
+                          ? 'bg-green-500/10'
+                          : 'bg-red-500/10'}"
+                      >
+                        <span class="text-xl"
+                          >{gamingChecklist.drivers_ok ? "✓" : "✗"}</span
+                        >
+                        <span class="text-sm">GPU Driver</span>
+                      </div>
+                      <div
+                        class="flex items-center gap-2 p-3 rounded-lg {gamingChecklist.kernel_tweaks_ok
+                          ? 'bg-green-500/10'
+                          : 'bg-red-500/10'}"
+                      >
+                        <span class="text-xl"
+                          >{gamingChecklist.kernel_tweaks_ok ? "✓" : "✗"}</span
+                        >
+                        <span class="text-sm">Kernel Tweaks</span>
+                      </div>
+                      <div
+                        class="flex items-center gap-2 p-3 rounded-lg {gamingChecklist.limits_ok
+                          ? 'bg-green-500/10'
+                          : 'bg-red-500/10'}"
+                      >
+                        <span class="text-xl"
+                          >{gamingChecklist.limits_ok ? "✓" : "✗"}</span
+                        >
+                        <span class="text-sm">ESYNC/FSYNC</span>
+                      </div>
+                      <div
+                        class="flex items-center gap-2 p-3 rounded-lg {gamingChecklist.gamemode_ok
+                          ? 'bg-green-500/10'
+                          : 'bg-red-500/10'}"
+                      >
+                        <span class="text-xl"
+                          >{gamingChecklist.gamemode_ok ? "✓" : "✗"}</span
+                        >
+                        <span class="text-sm">GameMode</span>
+                      </div>
+                    </div>
+
+                    {#if gamingChecklist.missing?.length > 0}
+                      <div class="mt-4 p-3 rounded-lg bg-yellow-500/10">
+                        <p class="text-sm font-semibold text-yellow-400">
+                          ⚠ Issues Found:
+                        </p>
+                        <ul class="text-sm text-gray-400 mt-2 space-y-1">
+                          {#each gamingChecklist.missing as issue}
+                            <li>• {issue}</li>
+                          {/each}
+                        </ul>
+                      </div>
+                    {/if}
+                  {/if}
+                </div>
+
+                <!-- One-Touch Action -->
+                <div
+                  class="card bg-gradient-to-r from-green-500/20 to-primary-500/20 border-green-500/30"
+                >
+                  <div class="flex items-center justify-between">
+                    <div>
+                      <h3 class="text-2xl font-bold">
+                        ⚡ One-Touch Gaming Setup
+                      </h3>
+                      <p class="text-gray-400 mt-2">
+                        Satu klik untuk install semua yang dibutuhkan gaming di
+                        Linux:
+                      </p>
+                      <ul class="text-sm text-gray-500 mt-2 space-y-1">
+                        <li>✓ Layer 1: 32-bit support + GPU Drivers</li>
+                        <li>✓ Layer 2: Vulkan + Wine + GameMode</li>
+                        <li>✓ Layer 3: Kernel Tweaks + ESYNC</li>
+                        <li>✓ Layer 4: Steam + MangoHud + Heroic</li>
+                      </ul>
+                    </div>
+                    <button
+                      class="btn btn-lg bg-gradient-to-r from-green-500 to-primary-500 text-white font-bold px-8 py-4 text-lg shadow-lg hover:shadow-green-500/20"
+                      disabled={runningOneTouch || gamingChecklist?.all_ok}
+                      onclick={handleOneTouchSetup}
+                    >
+                      {#if runningOneTouch}
+                        <div class="spinner w-5 h-5 mr-2"></div>
+                        Installing...
+                      {:else if gamingChecklist?.all_ok}
+                        ✓ Already Optimized!
+                      {:else}
+                        🚀 Setup Gaming Now!
+                      {/if}
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Installation Logs -->
+                {#if oneTouchLogs.length > 0}
+                  <div class="card">
+                    <h3 class="section-title mb-3">📜 Installation Log</h3>
+                    <div
+                      class="bg-surface-900 rounded-lg p-4 font-mono text-sm max-h-64 overflow-y-auto"
+                    >
+                      {#each oneTouchLogs as log}
+                        <p
+                          class={log.startsWith("✓")
+                            ? "text-green-400"
+                            : log.startsWith("⚠") || log.startsWith("❌")
+                              ? "text-yellow-400"
+                              : "text-gray-400"}
+                        >
+                          {log}
+                        </p>
+                      {/each}
+                    </div>
+                  </div>
+                {/if}
+              </div>
+            {/if}
+          {/if}
+        </div>
       {:else if currentPage === "about"}
         <!-- About Page -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -2430,7 +3121,7 @@
                 </div>
                 <div>
                   <h1 class="text-2xl font-bold">Glance</h1>
-                  <p class="text-gray-400">Version 0.1.0</p>
+                  <p class="text-gray-400">Version 26.1.1</p>
                   <p class="text-sm text-gray-500 mt-1">
                     Linux System Optimizer
                   </p>
@@ -2565,6 +3256,12 @@
                 >
                   <span class="text-primary-400">✓</span>
                   <span>DNS-level Ad Blocking</span>
+                </div>
+                <div
+                  class="flex items-center gap-3 p-3 rounded-lg bg-surface-800/50"
+                >
+                  <span class="text-green-400">✓</span>
+                  <span>Gaming Center (One-Touch Setup)</span>
                 </div>
                 <div
                   class="flex items-center gap-3 p-3 rounded-lg bg-surface-800/50"
