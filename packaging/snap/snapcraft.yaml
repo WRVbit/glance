@@ -57,8 +57,13 @@ parts:
       # Install Dependencies
       npm ci
       
-      # Build (without invalid bundles flag)
-      npm run tauri build
+      # Build Frontend (Svelte/Vite)
+      npm run build
+      
+      # Build Backend (Rust) - Bypass Tauri Bundler
+      cd src-tauri
+      cargo build --release
+      cd ..
       
       # Install binary
       mkdir -p $CRAFT_PART_INSTALL/bin
