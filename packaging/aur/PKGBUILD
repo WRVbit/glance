@@ -1,0 +1,40 @@
+# Maintainer: WRVbit <your-email@example.com>
+pkgname=glance
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="A beautiful, modern Linux system optimizer"
+arch=('x86_64')
+url="https://github.com/WRVbit/glance"
+license=('GPL3')
+depends=('gtk3' 'webkit2gtk' 'libappindicator-gtk3')
+makedepends=('cargo' 'nodejs' 'npm' 'git')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/WRVbit/glance/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('494ef2a6623e6f9a7403d82e8f2fad9ef0da72d703eb5f9ccb674903a504a05e')
+
+prepare() {
+  cd "$pkgname-$pkgver"
+  # Install frontend dependencies
+  npm ci
+}
+
+build() {
+  cd "$pkgname-$pkgver"
+  # Build the application
+  npm run tauri build -- --bundles deb
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  
+  # Install binary
+  install -Dm755 "src-tauri/target/release/glance-linuxoptimizer" "$pkgdir/usr/bin/glance"
+  
+  # Install desktop file
+  install -Dm644 "com.github.WRVbit.glance.desktop" "$pkgdir/usr/share/applications/com.github.WRVbit.glance.desktop"
+  
+  # Install icons
+  install -Dm644 "src-tauri/icons/32x32.png" "$pkgdir/usr/share/icons/hicolor/32x32/apps/com.github.WRVbit.glance.png"
+  install -Dm644 "src-tauri/icons/128x128.png" "$pkgdir/usr/share/icons/hicolor/128x128/apps/com.github.WRVbit.glance.png"
+  install -Dm644 "src-tauri/icons/128x128@2x.png" "$pkgdir/usr/share/icons/hicolor/256x256/apps/com.github.WRVbit.glance.png"
+  install -Dm644 "src-tauri/icons/icon.png" "$pkgdir/usr/share/icons/hicolor/512x512/apps/com.github.WRVbit.glance.png"
+}

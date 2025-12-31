@@ -1,0 +1,53 @@
+name: glance
+base: core24
+version: '0.1.0'
+summary: A beautiful, modern Linux system optimizer
+description: |
+  Glance is a modern Linux system optimizer that combines monitoring, cleaning, and optimization into one beautiful application. 
+  Built with Tauri v2 (Rust) and Svelte 5, featuring a stunning glassmorphism UI.
+
+grade: stable
+confinement: strict
+
+apps:
+  glance:
+    command: bin/glance-linuxoptimizer
+    extensions: [gnome]
+    plugs:
+      - system-observe
+      - hardware-observe
+      - network-observe
+      - network-control
+      - mount-observe
+      - home
+      - desktop
+      - desktop-legacy
+      - wayland
+      - x11
+
+parts:
+  glance:
+    plugin: npm
+    source: https://github.com/WRVbit/glance/archive/refs/tags/v0.1.0.tar.gz
+    npm-node-version: "20.11.0"
+    build-packages:
+      - rustc
+      - cargo
+      - libwebkit2gtk-4.1-dev
+      - build-essential
+      - curl
+      - wget
+      - pkg-config
+      - libssl-dev
+      - libgtk-3-dev
+      - libayatana-appindicator3-dev
+      - librsvg2-dev
+    stage-packages:
+      - libwebkit2gtk-4.1-0
+      - libgtk-3-0
+      - libayatana-appindicator3-1
+    override-build: |
+      npm ci
+      npm run tauri build -- --bundles none
+      mkdir -p $CRAFT_PART_INSTALL/bin
+      cp src-tauri/target/release/glance-linuxoptimizer $CRAFT_PART_INSTALL/bin/
