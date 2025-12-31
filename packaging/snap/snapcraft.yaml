@@ -27,7 +27,7 @@ apps:
 
 parts:
   glance:
-    plugin: npm
+    plugin: dump
     source: https://github.com/WRVbit/glance/archive/refs/tags/v0.1.0.tar.gz
     build-packages:
       - nodejs
