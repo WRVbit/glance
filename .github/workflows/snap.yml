@@ -15,11 +15,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build Snap
+      # Setup LXD specifically for Snapcraft
+      - name: Setup LXD
         uses: snapcore/action-build@v1
         id: build
         with:
           path: packaging/snap/
+          snapcraft-args: "--use-lxd"
 
       - name: Publish Snap
         uses: snapcore/action-publish@v1
