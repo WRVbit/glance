@@ -29,9 +29,9 @@ parts:
   glance:
     plugin: npm
     source: https://github.com/WRVbit/glance/archive/refs/tags/v0.1.0.tar.gz
-    npm-node-version: "20.11.0"
-    npm-include-node: true
     build-packages:
+      - nodejs
+      - npm
       - rustc
       - cargo
       - libwebkit2gtk-4.1-dev
