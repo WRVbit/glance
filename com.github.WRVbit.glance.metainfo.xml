@@ -32,6 +32,46 @@
       <caption>System Dashboard</caption>
       <image>https://raw.githubusercontent.com/WRVbit/glance/main/assets/screenshots/dashboard.png</image>
     </screenshot>
+    <screenshot>
+      <caption>System Monitor</caption>
+      <image>https://raw.githubusercontent.com/WRVbit/glance/main/assets/screenshots/system-monitor.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>System Cleaner</caption>
+      <image>https://raw.githubusercontent.com/WRVbit/glance/main/assets/screenshots/system-cleaner.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Performance Tweaks</caption>
+      <image>https://raw.githubusercontent.com/WRVbit/glance/main/assets/screenshots/performance.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Process Manager</caption>
+      <image>https://raw.githubusercontent.com/WRVbit/glance/main/assets/screenshots/process-manager.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Package Management</caption>
+      <image>https://raw.githubusercontent.com/WRVbit/glance/main/assets/screenshots/packages.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Repository Manager</caption>
+      <image>https://raw.githubusercontent.com/WRVbit/glance/main/assets/screenshots/repositories.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Services Control</caption>
+      <image>https://raw.githubusercontent.com/WRVbit/glance/main/assets/screenshots/services.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Startup Applications</caption>
+      <image>https://raw.githubusercontent.com/WRVbit/glance/main/assets/screenshots/startup-apps.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Ad-Block &amp; DNS Manager</caption>
+      <image>https://raw.githubusercontent.com/WRVbit/glance/main/assets/screenshots/ad-block-dns.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>About Glance</caption>
+      <image>https://raw.githubusercontent.com/WRVbit/glance/main/assets/screenshots/about.png</image>
+    </screenshot>
   </screenshots>
   
   <url type="homepage">https://github.com/WRVbit/glance</url>
