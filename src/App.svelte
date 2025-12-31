@@ -10,6 +10,7 @@
   import * as hostsService from "./lib/services/hosts";
   import * as dnsService from "./lib/services/dns";
   import { invoke } from "@tauri-apps/api/core";
+  import logoImage from "./assets/logo.png";
 
   // ============================================================================
   // State (Svelte 5 Runes)
@@ -686,11 +687,7 @@
     class="relative w-64 glass border-r border-white/10 flex flex-col p-4 z-10"
   >
     <div class="flex items-center gap-3 px-4 py-4 mb-6">
-      <img
-        src="/src/assets/logo.png"
-        alt="Glance Logo"
-        class="w-10 h-10 rounded-xl"
-      />
+      <img src={logoImage} alt="Glance Logo" class="w-10 h-10 rounded-xl" />
       <div>
         <h1 class="font-bold text-lg text-gradient">Glance</h1>
         <p class="text-xs text-gray-500">v0.1.0</p>
