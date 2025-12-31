@@ -48,7 +48,16 @@ parts:
       - libgtk-3-0
       - libayatana-appindicator3-1
     override-build: |
+      # Install Node.js 22 manually (System node is too old)
+      curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+      apt-get install -y nodejs
+      
+      # Install Dependencies
       npm ci
-      npm run tauri build -- --bundles none
+      
+      # Build (without invalid bundles flag)
+      npm run tauri build
+      
+      # Install binary
       mkdir -p $CRAFT_PART_INSTALL/bin
       cp src-tauri/target/release/glance-linuxoptimizer $CRAFT_PART_INSTALL/bin/
