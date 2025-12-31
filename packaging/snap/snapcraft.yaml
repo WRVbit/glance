@@ -1,6 +1,7 @@
 name: glance-optimizer
 base: core24
 version: '0.1.0'
+icon: icon.png
 title: Glance
 license: GPL-3.0
 contact: mailto:wrvbit@gmail.com
