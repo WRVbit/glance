@@ -24,7 +24,7 @@
   <img src="https://img.shields.io/badge/Tauri-2.0-blue?style=flat-square&logo=tauri" />
   <img src="https://img.shields.io/badge/Rust-1.75+-orange?style=flat-square&logo=rust" />
   <img src="https://img.shields.io/badge/Svelte-5.0-red?style=flat-square&logo=svelte" />
-  <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" />
+  <img src="https://img.shields.io/badge/License-GPL_3.0-green?style=flat-square" />
 </p>
 
 <p align="center">

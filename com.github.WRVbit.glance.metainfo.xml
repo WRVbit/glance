@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.github.WRVbit.glance</id>
+  <name>Glance</name>
+  <summary>A modern Linux system optimizer</summary>
+  <developer_name>WRVbit</developer_name>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  
+  <description>
+    <p>
+      Glance is a next-generation Linux system utility that combines monitoring, cleaning, and optimization into one stunning application.
+      Built with Tauri v2 and Svelte 5, it delivers a native-like experience with a modern glassmorphism UI.
+    </p>
+    <p>Key features include:</p>
+    <ul>
+      <li>System Dashboard: Real-time overview of CPU, Memory, Disk, and Network</li>
+      <li>Resource Monitor: Live performance graphs with historical data</li>
+      <li>System Cleaner: Safely reclaim disk space by cleaning caches and logs</li>
+      <li>Package Manager: Manage installed packages and dependencies</li>
+      <li>Services Manager: Control systemd services</li>
+      <li>Repository Manager: Manage mirrors and PPAs with speed testing</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">com.github.WRVbit.glance.desktop</launchable>
+  
+  <screenshots>
+    <screenshot type="default">
+      <caption>System Dashboard</caption>
+      <image>https://raw.githubusercontent.com/WRVbit/glance/main/assets/screenshots/dashboard.png</image>
+    </screenshot>
+  </screenshots>
+  
+  <url type="homepage">https://github.com/WRVbit/glance</url>
+  <url type="bugtracker">https://github.com/WRVbit/glance/issues</url>
+  <url type="vcs-browser">https://github.com/WRVbit/glance</url>
+  
+  <content_rating type="oars-1.1" />
+  
+  <releases>
+    <release version="0.1.0" date="2025-12-31">
+      <description>
+        <p>Initial release of Glance.</p>
+      </description>
+    </release>
+  </releases>
+</component>

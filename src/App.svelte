@@ -576,12 +576,14 @@
   // Lifecycle
   // ============================================================================
 
-  onMount(async () => {
-    await loadDashboard();
-    loading = false;
+  onMount(() => {
+    (async () => {
+      await loadDashboard();
+      loading = false;
 
-    // Start refresh interval for stats
-    refreshInterval = setInterval(refreshStats, 2000);
+      // Start refresh interval for stats
+      refreshInterval = setInterval(refreshStats, 2000);
+    })();
 
     return () => {
       if (refreshInterval) clearInterval(refreshInterval);
@@ -683,11 +685,11 @@
     class="relative w-64 glass border-r border-white/10 flex flex-col p-4 z-10"
   >
     <div class="flex items-center gap-3 px-4 py-4 mb-6">
-      <div
-        class="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center text-xl"
-      >
-        🚀
-      </div>
+      <img
+        src="/src/assets/logo.png"
+        alt="Glance Logo"
+        class="w-10 h-10 rounded-xl"
+      />
       <div>
         <h1 class="font-bold text-lg text-gradient">Glance</h1>
         <p class="text-xs text-gray-500">v0.1.0</p>
@@ -699,6 +701,7 @@
         <button
           class="nav-item w-full"
           class:active={currentPage === item.id}
+          aria-current={currentPage === item.id ? "page" : undefined}
           onclick={() => (currentPage = item.id)}
         >
           <span class="text-xl">{item.icon}</span>
@@ -1156,7 +1159,13 @@
                           value={tweak.current_value}
                           class="flex-1 h-2 bg-surface-700 rounded-lg appearance-none cursor-pointer accent-primary-500"
                           onchange={(e) =>
-                            handleApplyTweak(tweak.id, e.target.value)}
+                            handleApplyTweak(
+                              tweak.id,
+                              Number(
+                                /** @type {HTMLInputElement} */ (e.target)
+                                  .value,
+                              ),
+                            )}
                         />
                         <span class="text-xs text-gray-500 w-8 text-right"
                           >{tweak.max_value}</span
@@ -1398,6 +1407,7 @@
                     class="toggle"
                     class:bg-primary-600={app.is_enabled}
                     class:bg-surface-700={!app.is_enabled}
+                    aria-label={`Toggle ${app.name} startup`}
                     onclick={() => handleToggleStartup(app)}
                   >
                     <span
