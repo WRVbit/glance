@@ -43,7 +43,13 @@
           "libwebkit2gtk-4.1-0",
           "libgtk-3-0"
         ],
-        "desktopTemplate": "../com.github.WRVbit.glance.desktop"
+        "desktopTemplate": "../com.github.WRVbit.glance.desktop",
+        "files": {
+          "src-tauri/icons/32x32.png": "/usr/share/icons/hicolor/32x32/apps/com.github.WRVbit.glance.png",
+          "src-tauri/icons/128x128.png": "/usr/share/icons/hicolor/128x128/apps/com.github.WRVbit.glance.png",
+          "src-tauri/icons/128x128@2x.png": "/usr/share/icons/hicolor/256x256/apps/com.github.WRVbit.glance.png",
+          "src-tauri/icons/icon.png": "/usr/share/icons/hicolor/512x512/apps/com.github.WRVbit.glance.png"
+        }
       }
     },
     "shortDescription": "A next-generation Linux system utility for monitoring, cleaning, and optimization",

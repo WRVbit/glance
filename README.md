@@ -160,7 +160,45 @@ Configure system DNS settings.
 
 ## 📸 Screenshots
 
-*Coming soon - The UI features a stunning dark glassmorphism design with gradient accents.*
+<p align="center">
+  <img src="assets/screenshots/dashboard.png" alt="Dashboard" width="700" />
+</p>
+<p align="center"><em>System Dashboard - Real-time system monitoring</em></p>
+
+<p align="center">
+  <img src="assets/screenshots/system-monitor.png" alt="System Monitor" width="700" />
+</p>
+<p align="center"><em>System Monitor - Live resource graphs</em></p>
+
+<p align="center">
+  <img src="assets/screenshots/system-cleaner.png" alt="System Cleaner" width="700" />
+</p>
+<p align="center"><em>System Cleaner - Reclaim disk space</em></p>
+
+<p align="center">
+  <img src="assets/screenshots/performance.png" alt="Performance" width="700" />
+</p>
+<p align="center"><em>Performance Tweaks - Optimize system settings</em></p>
+
+<p align="center">
+  <img src="assets/screenshots/packages.png" alt="Packages" width="700" />
+</p>
+<p align="center"><em>Package Management - Manage installed packages</em></p>
+
+<p align="center">
+  <img src="assets/screenshots/services.png" alt="Services" width="700" />
+</p>
+<p align="center"><em>Services Control - Manage systemd services</em></p>
+
+<p align="center">
+  <img src="assets/screenshots/repositories.png" alt="Repositories" width="700" />
+</p>
+<p align="center"><em>Repository Manager - Manage mirrors and PPAs</em></p>
+
+<p align="center">
+  <img src="assets/screenshots/ad-block-dns.png" alt="Ad-Block & DNS" width="700" />
+</p>
+<p align="center"><em>Ad-Block & DNS - DNS-level ad blocking</em></p>
 
 ---
 
