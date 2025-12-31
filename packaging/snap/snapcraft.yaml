@@ -1,4 +1,4 @@
-name: glance
+name: glance-optimizer
 base: core24
 version: '0.1.0'
 summary: A beautiful, modern Linux system optimizer
