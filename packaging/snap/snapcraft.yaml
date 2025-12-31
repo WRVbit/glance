@@ -32,8 +32,6 @@ parts:
     build-packages:
       - nodejs
       - npm
-      - rustc
-      - cargo
       - libwebkit2gtk-4.1-dev
       - build-essential
       - curl
@@ -51,6 +49,10 @@ parts:
       # Install Node.js 22 manually (System node is too old)
       curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
       apt-get install -y nodejs
+      
+      # Install Rust manually (System rustc is too old)
+      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+      export PATH="$HOME/.cargo/bin:$PATH"
       
       # Install Dependencies
       npm ci
