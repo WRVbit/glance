@@ -45,8 +45,9 @@ modules:
       - npm run tauri build -- --bundles none
       # Install binary
       - install -Dm755 src-tauri/target/release/glance-linuxoptimizer /app/bin/glance-linuxoptimizer
-      # Install desktop file
-      - install -Dm644 com.github.WRVbit.glance.desktop /app/share/applications/com.github.WRVbit.glance.desktop
+      # Install desktop file (with corrected icon name for Flatpak)
+      - sed 's/Icon=glance-linuxoptimizer/Icon=com.github.WRVbit.glance/' com.github.WRVbit.glance.desktop > /tmp/glance.desktop
+      - install -Dm644 /tmp/glance.desktop /app/share/applications/com.github.WRVbit.glance.desktop
       # Install metainfo
       - install -Dm644 com.github.WRVbit.glance.metainfo.xml /app/share/metainfo/com.github.WRVbit.glance.metainfo.xml
       # Install icons (all sizes for proper display in desktop/taskbar)
