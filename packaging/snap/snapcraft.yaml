@@ -1,6 +1,12 @@
 name: glance-optimizer
 base: core24
 version: '0.1.0'
+title: Glance
+license: GPL-3.0
+contact: mailto:wrvbit@gmail.com
+website: https://github.com/WRVbit/glance
+source-code: https://github.com/WRVbit/glance
+issues: https://github.com/WRVbit/glance/issues
 summary: A beautiful, modern Linux system optimizer
 description: |
   Glance is a modern Linux system optimizer that combines monitoring, cleaning, and optimization into one beautiful application. 
