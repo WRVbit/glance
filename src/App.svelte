@@ -15,7 +15,7 @@
   // State (Svelte 5 Runes)
   // ============================================================================
 
-  /** @type {'dashboard' | 'cleaner' | 'tweaks' | 'services' | 'startup' | 'packages' | 'processes' | 'repositories' | 'resources' | 'hosts'} */
+  /** @type {'dashboard' | 'cleaner' | 'tweaks' | 'services' | 'startup' | 'packages' | 'processes' | 'repositories' | 'resources' | 'hosts' | 'about'} */
   let currentPage = $state("dashboard");
   let loading = $state(true);
 
@@ -132,6 +132,7 @@
   // Navigation
   // ============================================================================
 
+  /** @type {{id: 'dashboard' | 'cleaner' | 'tweaks' | 'services' | 'startup' | 'packages' | 'processes' | 'repositories' | 'resources' | 'hosts' , icon: string, label: string}[]} */
   const navItems = [
     // Overview
     { id: "dashboard", icon: "⬢", label: "Dashboard" },
@@ -702,7 +703,8 @@
           class="nav-item w-full"
           class:active={currentPage === item.id}
           aria-current={currentPage === item.id ? "page" : undefined}
-          onclick={() => (currentPage = item.id)}
+          onclick={() =>
+            (currentPage = /** @type {typeof currentPage} */ (item.id))}
         >
           <span class="text-xl">{item.icon}</span>
           <span>{item.label}</span>
@@ -710,12 +712,14 @@
       {/each}
     </nav>
 
-    {#if distroInfo}
-      <div class="mt-4 p-4 glass rounded-xl text-xs">
-        <p class="text-gray-400">{distroInfo.name}</p>
-        <p class="text-gray-500">{distroInfo.version}</p>
-      </div>
-    {/if}
+    <!-- Sidebar Footer (clickable to About) -->
+    <button
+      class="mt-auto p-4 text-xs text-center w-full hover:bg-white/5 transition-colors cursor-pointer"
+      onclick={() => (currentPage = "about")}
+    >
+      <p class="text-gray-500">Thank you, {systemInfo?.hostname ?? "User"}!</p>
+      <p class="text-gray-600">Glance © 2025</p>
+    </button>
   </aside>
 
   <!-- Main Content -->
@@ -2411,6 +2415,178 @@
                   onfocus={() => (selectedDnsProvider = "custom")}
                 />
               </div>
+            </div>
+          </div>
+        </div>
+      {:else if currentPage === "about"}
+        <!-- About Page -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <!-- Left Column -->
+          <div class="space-y-6">
+            <!-- App Header Card -->
+            <div class="card">
+              <div class="flex items-center gap-6">
+                <div
+                  class="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center text-4xl font-bold text-white shadow-lg"
+                >
+                  G
+                </div>
+                <div>
+                  <h1 class="text-2xl font-bold">Glance</h1>
+                  <p class="text-gray-400">Version 0.1.0</p>
+                  <p class="text-sm text-gray-500 mt-1">
+                    Linux System Optimizer
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Description Card -->
+            <div class="card">
+              <h3 class="section-title">About</h3>
+              <p class="text-gray-400 leading-relaxed">
+                A next-generation Linux system utility that combines monitoring,
+                cleaning, and optimization into one stunning application. Built
+                with modern technologies for a native-like experience.
+              </p>
+              <p class="text-gradient font-semibold mt-4">
+                See Everything. Optimize Anything. Beautiful by Default.
+              </p>
+            </div>
+
+            <!-- Credits Card -->
+            <div class="card">
+              <h3 class="section-title">Credits</h3>
+              <div class="space-y-2">
+                <div
+                  class="flex items-center justify-between p-3 rounded-lg bg-surface-800/50"
+                >
+                  <span class="text-gray-400">Developer</span>
+                  <span class="font-medium">WRVbit</span>
+                </div>
+                <div
+                  class="flex items-center justify-between p-3 rounded-lg bg-surface-800/50"
+                >
+                  <span class="text-gray-400">License</span>
+                  <span class="font-medium">GPL-3.0</span>
+                </div>
+                <div
+                  class="flex items-center justify-between p-3 rounded-lg bg-surface-800/50"
+                >
+                  <span class="text-gray-400">Year</span>
+                  <span class="font-medium">2025</span>
+                </div>
+                <div
+                  class="flex items-center justify-between p-3 rounded-lg bg-surface-800/50"
+                >
+                  <span class="text-gray-400">Repository</span>
+                  <span class="text-primary-400">github.com/WRVbit/glance</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Column -->
+          <div class="space-y-6">
+            <!-- Tech Stack Card -->
+            <div class="card">
+              <h3 class="section-title">Built With</h3>
+              <div class="grid grid-cols-2 gap-3">
+                <div
+                  class="flex flex-col items-center p-4 rounded-xl bg-surface-800/50"
+                >
+                  <span class="text-3xl mb-2">🦀</span>
+                  <span class="font-medium">Rust</span>
+                  <span class="text-xs text-gray-500">Backend</span>
+                </div>
+                <div
+                  class="flex flex-col items-center p-4 rounded-xl bg-surface-800/50"
+                >
+                  <span class="text-3xl mb-2">🔥</span>
+                  <span class="font-medium">Svelte 5</span>
+                  <span class="text-xs text-gray-500">Frontend</span>
+                </div>
+                <div
+                  class="flex flex-col items-center p-4 rounded-xl bg-surface-800/50"
+                >
+                  <span class="text-3xl mb-2">⚡</span>
+                  <span class="font-medium">Tauri 2</span>
+                  <span class="text-xs text-gray-500">Framework</span>
+                </div>
+                <div
+                  class="flex flex-col items-center p-4 rounded-xl bg-surface-800/50"
+                >
+                  <span class="text-3xl mb-2">🎨</span>
+                  <span class="font-medium">Glassmorphism</span>
+                  <span class="text-xs text-gray-500">Design</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Features Card -->
+            <div class="card">
+              <h3 class="section-title">Features</h3>
+              <div class="grid grid-cols-1 gap-2">
+                <div
+                  class="flex items-center gap-3 p-3 rounded-lg bg-surface-800/50"
+                >
+                  <span class="text-primary-400">✓</span>
+                  <span>Real-time System Monitoring</span>
+                </div>
+                <div
+                  class="flex items-center gap-3 p-3 rounded-lg bg-surface-800/50"
+                >
+                  <span class="text-primary-400">✓</span>
+                  <span>Disk Space Cleaner</span>
+                </div>
+                <div
+                  class="flex items-center gap-3 p-3 rounded-lg bg-surface-800/50"
+                >
+                  <span class="text-primary-400">✓</span>
+                  <span>Performance Tweaks</span>
+                </div>
+                <div
+                  class="flex items-center gap-3 p-3 rounded-lg bg-surface-800/50"
+                >
+                  <span class="text-primary-400">✓</span>
+                  <span>Package Management</span>
+                </div>
+                <div
+                  class="flex items-center gap-3 p-3 rounded-lg bg-surface-800/50"
+                >
+                  <span class="text-primary-400">✓</span>
+                  <span>Service Control</span>
+                </div>
+                <div
+                  class="flex items-center gap-3 p-3 rounded-lg bg-surface-800/50"
+                >
+                  <span class="text-primary-400">✓</span>
+                  <span>Repository Manager</span>
+                </div>
+                <div
+                  class="flex items-center gap-3 p-3 rounded-lg bg-surface-800/50"
+                >
+                  <span class="text-primary-400">✓</span>
+                  <span>DNS-level Ad Blocking</span>
+                </div>
+                <div
+                  class="flex items-center gap-3 p-3 rounded-lg bg-surface-800/50"
+                >
+                  <span class="text-primary-400">✓</span>
+                  <span>Multi-distro Support</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Thank You Card -->
+            <div class="card text-center py-6">
+              <p class="text-gray-400">Thank you for using Glance,</p>
+              <p class="text-xl font-bold text-gradient mt-1">
+                {systemInfo?.hostname ?? "User"}!
+              </p>
+              <p class="text-sm text-gray-500 mt-2">
+                Made with ❤️ for the Linux community
+              </p>
             </div>
           </div>
         </div>

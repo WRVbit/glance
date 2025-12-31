@@ -1,11 +1,12 @@
 [Desktop Entry]
 Type=Application
 Name=Glance
-Comment=A modern Linux system optimizer
-Exec=glance
+Comment=A next-generation Linux system utility for monitoring, cleaning, and optimization
+Exec=glance-linuxoptimizer
 Icon=com.github.WRVbit.glance
-Categories=System;Monitor;Utility;
+Categories=System;
 Terminal=false
 StartupNotify=true
+StartupWMClass=glance-linuxoptimizer
 Keywords=system;monitor;cleaner;optimizer;
 X-Purism-FormFactor=Workstation;Mobile;

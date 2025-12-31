@@ -42,8 +42,11 @@
         "depends": [
           "libwebkit2gtk-4.1-0",
           "libgtk-3-0"
-        ]
+        ],
+        "desktopTemplate": "../com.github.WRVbit.glance.desktop"
       }
-    }
+    },
+    "shortDescription": "A next-generation Linux system utility for monitoring, cleaning, and optimization",
+    "longDescription": "Glance is a next-generation Linux system utility that combines monitoring, cleaning, and optimization into one stunning application. Built with Tauri v2 and Svelte 5, it delivers a native-like experience with a modern glassmorphism UI. See Everything. Optimize Anything. Beautiful by Default."
   }
 }

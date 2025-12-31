@@ -2,8 +2,10 @@
 <component type="desktop-application">
   <id>com.github.WRVbit.glance</id>
   <name>Glance</name>
-  <summary>A modern Linux system optimizer</summary>
-  <developer_name>WRVbit</developer_name>
+  <summary>A next-generation Linux system utility for monitoring, cleaning, and optimization</summary>
+  <developer id="io.github.wrvbit">
+    <name>WRVbit</name>
+  </developer>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-only</project_license>
   

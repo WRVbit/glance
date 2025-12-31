@@ -1180,7 +1180,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "glance"
+name = "glance-linuxoptimizer"
 version = "0.1.0"
 dependencies = [
  "anyhow",

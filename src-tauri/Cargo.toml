@@ -1,7 +1,7 @@
 [package]
-name = "glance"
+name = "glance-linuxoptimizer"
 version = "0.1.0"
-description = "A modern Linux system optimizer - inspired by Stacer"
+description = "A next-generation Linux system utility for monitoring, cleaning, and optimization. See Everything. Optimize Anything."
 authors = ["WRVbit"]
 license = "GPL-3.0"
 repository = "https://github.com/WRVbit/glance"
